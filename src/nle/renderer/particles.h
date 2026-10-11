@@ -80,7 +80,16 @@ enum class particle_style
      * to one, so the gaps between are uneven the way real crackling is --
      * with no timer anywhere outside the shader.
      */
-    arc
+    arc,
+
+    /**
+     * @brief Round and round in a flat ring, evenly spaced, twinkling, and
+     *        drawn as little four-pointed stars. Stars round a dazed head.
+     *
+     * Nothing is born or dies: the ring is always full. Radius is the
+     * ring's, and speed is how many turns a second, in radians.
+     */
+    orbit
 };
 
 /**

@@ -177,6 +177,20 @@ void main()
         float strikes = step(hash3(strike * 3.7).x, u_speed);
         size *= (0.55 + r.x * 0.45) * strikes;
     }
+    else if(u_style == 7)
+    {
+        // Orbit: evenly round a flat ring, turning, each bobbing a little out
+        // of step with the next. Never born and never dying -- its age is a
+        // twinkle, kept young so the stars stay bright.
+        float slot = index / float(max(u_count, 1)) * 6.2831853;
+        float turn = u_time * u_speed + slot;
+        float bob = sin(u_time * 3.0 + slot * 2.0) * u_radius * 0.15;
+
+        local = vec3(cos(turn) * u_radius, bob, sin(turn) * u_radius);
+
+        age = 0.1 + 0.1 * sin(u_time * 7.0 + index * 2.3);
+        size *= 0.85 + 0.25 * sin(u_time * 6.0 + index * 1.7);
+    }
     else
     {
         // Spark: straight out, fast, gone. Born inside the radius for the
@@ -230,6 +244,7 @@ in vec2  v_corner;
 uniform vec3  u_born;
 uniform vec3  u_dying;
 uniform float u_intensity;
+uniform int   u_style;
 
 out vec4 frag_color;
 
@@ -240,6 +255,15 @@ void main()
     float r = length(v_corner) * 2.0;
     float fall = clamp(1.0 - r, 0.0, 1.0);
     fall *= fall;
+
+    // A star for one going round a dazed head: four points, the curve whose
+    // arms run out along the axes, with a little glow left at its heart.
+    if(u_style == 7)
+    {
+        vec2 c = abs(v_corner * 2.0);
+        float star = clamp(1.0 - (pow(c.x, 0.55) + pow(c.y, 0.55)), 0.0, 1.0);
+        fall = max(star * 1.6, fall * 0.35);
+    }
 
     if(fall <= 0.001)
     {
