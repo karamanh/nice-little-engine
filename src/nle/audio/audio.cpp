@@ -1,5 +1,6 @@
 #include "audio.h"
 
+#include "../core/files.h"
 #include "../core/utils.h"
 
 #include <algorithm>
@@ -18,6 +19,10 @@ namespace nle
 struct audio_track
 {
     Mix_Music* music = nullptr;
+
+    /// The file, read through nle::files. Music is decoded as it plays, so
+    /// the bytes have to outlive it.
+    std::string bytes;
 };
 
 namespace
@@ -97,11 +102,20 @@ audio_track* audio::track_for(const std::string& path)
         return found->second;
     }
 
-    Mix_Music* loaded = Mix_LoadMUS(path.c_str());
+    auto bytes = files::read(path);
+    auto* track = new audio_track();
+    Mix_Music* loaded = nullptr;
+
+    if(bytes)
+    {
+        track->bytes = std::move(*bytes);
+        loaded = Mix_LoadMUS_RW(SDL_RWFromConstMem(track->bytes.data(), static_cast<int>(track->bytes.size())), 1);
+    }
 
     if(loaded == nullptr)
     {
-        utils::prerror("audio: could not load", path, ":", Mix_GetError());
+        utils::prerror("audio: could not load", path, ":", bytes ? Mix_GetError() : "no such file");
+        delete track;
 
         // Remembered as a failure too, so a missing file is reported once
         // rather than on every frame that asks for it.
@@ -109,7 +123,6 @@ audio_track* audio::track_for(const std::string& path)
         return nullptr;
     }
 
-    auto* track = new audio_track();
     track->music = loaded;
 
     m_tracks[path] = track;

@@ -1,5 +1,6 @@
 #include "texture.h"
 
+#include "../core/files.h"
 #include "../core/utils.h"
 #include "../../vendor/stb_image.h"
 
@@ -52,9 +53,19 @@ namespace nle
         if(m_id != 0)
             return;
         
+        const auto bytes = files::read(path);
+
+        if (!bytes || bytes->empty())
+        {
+            utils::prerror("Texture::load_from_file(): nothing here", path);
+            return;
+        }
+
         stbi_set_flip_vertically_on_load(flip);
 
-        unsigned char *data = stbi_load(path.c_str(), &m_width, &m_height, &m_bit_depth, STBI_rgb_alpha);
+        unsigned char *data = stbi_load_from_memory(reinterpret_cast<const stbi_uc *>(bytes->data()),
+                                                    static_cast<int>(bytes->size()), &m_width, &m_height,
+                                                    &m_bit_depth, STBI_rgb_alpha);
 
         // The flag is stb's, not this texture's: one switch for the whole
         // program. Left on, it flipped whatever stb decoded next -- which

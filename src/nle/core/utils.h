@@ -1,5 +1,7 @@
 #pragma once
 
+#include "files.h"
+
 #include <array>
 #include <random>
 #include <string>
@@ -70,15 +72,11 @@ namespace nle::utils
         return result;
     }
 
+    /// The whole of a file, empty if there is none. Through nle::files, so
+    /// shaders come from wherever the game keeps its files.
     inline std::string load_file(const std::string& path)
     {
-        std::ifstream ifs(path);
-        std::stringstream iss;
-        if(ifs.is_open())
-        {
-            iss << ifs.rdbuf();
-        }
-        return iss.str();
+        return files::read(path).value_or(std::string());
     }
 
 } // namespace nle

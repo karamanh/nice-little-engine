@@ -3,6 +3,7 @@
 
 #include "../animation/retarget.h"
 
+#include "../core/files.h"
 #include "../core/utils.h"
 
 // tinygltf pulls in stb_image and nlohmann's json. The stb implementation comes
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <cmath>
 #include <stdexcept>
 #include <unordered_map>
@@ -431,9 +433,51 @@ void model_gltf::load(const std::string& path)
     // after some other picture had been.
     stbi_set_flip_vertically_on_load(false);
 
+    // Read through nle::files, the file and whatever it names beside it (a
+    // .gltf's buffers and pictures), so a game that ships its files changed
+    // can hand them over as they were.
+    tinygltf::FsCallbacks callbacks{};
+    callbacks.FileExists = [](const std::string& name, void*) { return files::exists(name); };
+    callbacks.ExpandFilePath = &tinygltf::ExpandFilePath;
+    callbacks.WriteWholeFile = &tinygltf::WriteWholeFile;
+    callbacks.ReadWholeFile = [](std::vector<unsigned char>* out, std::string* err,
+                                 const std::string& name, void*) {
+        const auto bytes = files::read(name);
+
+        if(!bytes)
+        {
+            if(err != nullptr)
+            {
+                *err += "could not read " + name + "\n";
+            }
+
+            return false;
+        }
+
+        out->assign(bytes->begin(), bytes->end());
+        return true;
+    };
+
+    // Left out on purpose: the size on disk is not the size of what is read.
+    callbacks.GetFileSizeInBytes = nullptr;
+    callbacks.user_data = nullptr;
+    loader.SetFsCallbacks(callbacks);
+
+    const auto bytes = files::read(path);
+
+    if(!bytes)
+    {
+        throw std::runtime_error("model_gltf: failed to load '" + path + "': could not read it");
+    }
+
+    const std::string base_dir = std::filesystem::path(path).parent_path().string();
+
     const bool loaded = binary
-        ? loader.LoadBinaryFromFile(&gltf, &error, &warning, path)
-        : loader.LoadASCIIFromFile(&gltf, &error, &warning, path);
+        ? loader.LoadBinaryFromMemory(&gltf, &error, &warning,
+                                      reinterpret_cast<const unsigned char*>(bytes->data()),
+                                      static_cast<unsigned int>(bytes->size()), base_dir)
+        : loader.LoadASCIIFromString(&gltf, &error, &warning, bytes->data(),
+                                     static_cast<unsigned int>(bytes->size()), base_dir);
 
     if(!warning.empty())
     {
