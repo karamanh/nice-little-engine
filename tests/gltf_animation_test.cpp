@@ -216,6 +216,48 @@ void test_model(const std::string& path)
     // stop() returns to the bind pose.
     animator->stop();
     check(is_identity(animator->joint_matrices(0)[1]), "stop() restores the bind pose");
+
+    // An overlay poses only its branch: the bending joint, from the bending
+    // joint down, and nothing from a node the clip does not reach.
+    const int bending = skeleton->skins()[0].joints[1];
+    const int other_root = skeleton->roots()[0] == skeleton->skins()[0].joints[0] ? skeleton->roots()[1]
+                                                                                  : skeleton->roots()[0];
+
+    check(!animator->play_overlay("does_not_exist", bending), "an unknown overlay is rejected");
+    check(!animator->play_overlay("bend", 99), "an overlay on a node that is not there is rejected");
+
+    check(animator->play_overlay("bend", other_root, false), "an overlay can be put on any branch");
+    animator->seek_overlay(1.0f);
+    check(is_identity(animator->joint_matrices(0)[1]), "a branch the clip does not reach is left alone");
+
+    animator->play("bend", false);
+    check(animator->play_overlay("bend", bending, false), "an overlay can be put over a playing clip");
+    animator->seek(0.0f);
+    animator->seek_overlay(1.0f);
+    check_vec3_near(glm::vec3(animator->joint_matrices(0)[1] * glm::vec4(top_vertex, 1.0f)),
+                    glm::vec3(-1.0f, 1.25f, 0.25f), "the overlay's branch takes the overlay's pose");
+    check(is_identity(animator->joint_matrices(0)[0]), "and the rest keeps the main clip's");
+
+    // Started again: one that has reached its end is held there, as a main
+    // clip is, and seeking does not set it going.
+    animator->play("bend", false);
+    animator->play_overlay("bend", bending, false);
+    animator->set_overlay_speed(2.0f);
+    animator->update(0.25f);
+    check_near(animator->overlay_time(), 0.5f, "the overlay keeps its own pace");
+    check_near(animator->time(), 0.25f, "and the main clip its own");
+
+    animator->update(5.0f);
+    check(animator->overlay_active(), "an overlay that ends holds its last frame");
+
+    animator->stop_overlay();
+    check(!animator->overlay_active(), "stop_overlay() takes it off");
+    check(!is_identity(animator->joint_matrices(0)[1]) || animator->time() == 0.0f,
+          "and the main clip has the whole body again");
+
+    animator->play("bend", false);
+    animator->seek(0.0f);
+    check(is_identity(animator->joint_matrices(0)[1]), "with nothing of the overlay left on it");
 }
 
 } // namespace

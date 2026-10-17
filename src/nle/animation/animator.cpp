@@ -78,6 +78,9 @@ void animator::stop()
     m_current_clip = -1;
     m_time = 0.0f;
 
+    m_overlay_clip = -1;
+    m_overlay_playing = false;
+
     reset_pose();
     compute_world_matrices();
     compute_joint_matrices();
@@ -148,51 +151,158 @@ void animator::seek(float time)
     update(0.0f);
 }
 
-void animator::update(float delta_time)
+bool animator::play_overlay(const std::string& name, int from_node, bool loop)
 {
-    auto clip = current_clip();
-    if(!clip)
+    if(!m_skeleton || from_node < 0 || static_cast<size_t>(from_node) >= m_skeleton->nodes().size())
     {
-        return;
+        return false;
     }
 
-    if(m_playing)
+    int found = -1;
+
+    for(size_t i = 0; i < m_clips.size(); ++i)
     {
-        m_time += delta_time * m_speed;
+        if(m_clips[i] && m_clips[i]->name() == name)
+        {
+            found = static_cast<int>(i);
+            break;
+        }
     }
 
-    const float length = clip->duration();
+    if(found < 0)
+    {
+        return false;
+    }
+
+    // The branch: the node and everything under it.
+    const auto& nodes = m_skeleton->nodes();
+    m_overlay_nodes.assign(nodes.size(), 0);
+
+    std::vector<int> stack{ from_node };
+
+    while(!stack.empty())
+    {
+        const int index = stack.back();
+        stack.pop_back();
+
+        if(index < 0 || static_cast<size_t>(index) >= nodes.size() || m_overlay_nodes[static_cast<size_t>(index)])
+        {
+            continue;
+        }
+
+        m_overlay_nodes[static_cast<size_t>(index)] = 1;
+        stack.insert(stack.end(), nodes[static_cast<size_t>(index)].children.begin(),
+                     nodes[static_cast<size_t>(index)].children.end());
+    }
+
+    m_overlay_clip = found;
+    m_overlay_looping = loop;
+    m_overlay_time = 0.0f;
+    m_overlay_speed = 1.0f;
+    m_overlay_playing = true;
+
+    update(0.0f);
+    return true;
+}
+
+void animator::stop_overlay()
+{
+    m_overlay_clip = -1;
+    m_overlay_playing = false;
+    update(0.0f);
+}
+
+bool animator::overlay_active() const
+{
+    return m_overlay_clip >= 0;
+}
+
+void animator::set_overlay_speed(float speed)
+{
+    m_overlay_speed = speed;
+}
+
+void animator::seek_overlay(float time)
+{
+    m_overlay_time = time;
+    update(0.0f);
+}
+
+float animator::overlay_time() const
+{
+    return m_overlay_time;
+}
+
+float animator::overlay_duration() const
+{
+    return m_overlay_clip >= 0 && m_clips[static_cast<size_t>(m_overlay_clip)]
+        ? m_clips[static_cast<size_t>(m_overlay_clip)]->duration()
+        : 0.0f;
+}
+
+void animator::advance(float& time, float delta_time, float length, bool looping, bool& playing)
+{
+    if(playing)
+    {
+        time += delta_time;
+    }
 
     if(length > 0.0f)
     {
-        if(m_looping)
+        if(looping)
         {
             // fmod keeps the sign of the dividend, so negative speeds need a
             // nudge back into [0, length).
-            m_time = std::fmod(m_time, length);
-            if(m_time < 0.0f)
+            time = std::fmod(time, length);
+            if(time < 0.0f)
             {
-                m_time += length;
+                time += length;
             }
         }
-        else if(m_time >= length)
+        else if(time >= length)
         {
-            m_time = length;
-            m_playing = false;
+            time = length;
+            playing = false;
         }
-        else if(m_time < 0.0f)
+        else if(time < 0.0f)
         {
-            m_time = 0.0f;
-            m_playing = false;
+            time = 0.0f;
+            playing = false;
         }
     }
     else
     {
-        m_time = 0.0f;
+        time = 0.0f;
+    }
+}
+
+void animator::update(float delta_time)
+{
+    auto clip = current_clip();
+    const animation_clip* overlay = m_overlay_clip >= 0 ? m_clips[static_cast<size_t>(m_overlay_clip)].get() : nullptr;
+
+    if(!clip && !overlay)
+    {
+        return;
     }
 
     reset_pose();
-    apply_clip(m_time);
+
+    if(clip)
+    {
+        advance(m_time, delta_time * m_speed, clip->duration(), m_looping, m_playing);
+        apply_clip(m_time);
+    }
+
+    // Over the main clip, on its branch only: what the overlay does not move
+    // keeps whatever the main clip gave it.
+    if(overlay)
+    {
+        advance(m_overlay_time, delta_time * m_overlay_speed, overlay->duration(), m_overlay_looping,
+                m_overlay_playing);
+        apply_channels(*overlay, m_overlay_time, &m_overlay_nodes);
+    }
+
     compute_world_matrices();
     compute_joint_matrices();
 }
@@ -210,24 +320,31 @@ void animator::reset_pose()
 
 void animator::apply_clip(float time)
 {
-    auto clip = current_clip();
-    if(!clip)
+    if(auto clip = current_clip())
     {
-        return;
+        apply_channels(*clip, time, nullptr);
     }
+}
 
-    for(const auto& channel : clip->channels)
+void animator::apply_channels(const animation_clip& clip, float time, const std::vector<char>* only)
+{
+    for(const auto& channel : clip.channels)
     {
         if(channel.node < 0 || static_cast<size_t>(channel.node) >= m_pose.size())
         {
             continue;
         }
-        if(channel.sampler < 0 || static_cast<size_t>(channel.sampler) >= clip->samplers.size())
+        if(only != nullptr
+           && (static_cast<size_t>(channel.node) >= only->size() || !(*only)[static_cast<size_t>(channel.node)]))
+        {
+            continue;
+        }
+        if(channel.sampler < 0 || static_cast<size_t>(channel.sampler) >= clip.samplers.size())
         {
             continue;
         }
 
-        const auto& sampler = clip->samplers[static_cast<size_t>(channel.sampler)];
+        const auto& sampler = clip.samplers[static_cast<size_t>(channel.sampler)];
         auto& node = m_pose[static_cast<size_t>(channel.node)];
 
         switch(channel.path)

@@ -18,12 +18,15 @@ namespace nle
 {
 
 /**
- * @brief Plays a single clip over a per-instance copy of a skeleton's pose.
+ * @brief Plays a clip over a per-instance copy of a skeleton's pose, and
+ *        optionally a second one over part of it.
  *
- * Deliberately simple: one clip at a time, no blending and no layering. Each
- * update() samples the clip into the local pose, walks the hierarchy to get
- * world matrices, and from those builds one joint matrix palette per skin,
- * ready to be handed to the vertex shader.
+ * Deliberately simple: one clip at a time, no blending -- and one overlay,
+ * which poses only a branch of the skeleton (the spine up, say) while the
+ * main clip poses the rest, so legs can run while arms swing. Each update()
+ * samples the clips into the local pose, walks the hierarchy to get world
+ * matrices, and from those builds one joint matrix palette per skin, ready
+ * to be handed to the vertex shader.
  *
  * The skeleton is shared between instances; the pose is not, so several
  * instances of the same model can play different clips at different times.
@@ -68,6 +71,33 @@ public:
 
     ref<animation_clip> current_clip() const;
 
+    /**
+     * @brief Plays @p name over the current clip, on part of the body only.
+     *
+     * @p from_node and every node under it take the overlay's pose; the rest
+     * keeps the main clip's. Starting or changing the main clip leaves the
+     * overlay alone. A clip that does not loop holds its last frame when it
+     * ends, until stop_overlay().
+     *
+     * @return false, changing nothing, if no clip has that name or the node
+     *         is not in the skeleton.
+     */
+    bool play_overlay(const std::string& name, int from_node, bool loop = false);
+
+    /// Takes the overlay off: the whole body is the main clip's again.
+    void stop_overlay();
+
+    /// Whether an overlay is on, still playing or held at its end.
+    bool overlay_active() const;
+
+    /// Playback rate of the overlay, as set_speed() is for the main clip.
+    void set_overlay_speed(float speed);
+
+    /// Jumps the overlay to @p time (seconds) and re-poses.
+    void seek_overlay(float time);
+    float overlay_time() const;
+    float overlay_duration() const;
+
     /// Advances playback by @p delta_time seconds and recomputes the pose.
     void update(float delta_time);
 
@@ -91,6 +121,13 @@ private:
     /// Writes the current clip's value at @p time into the local pose.
     void apply_clip(float time);
 
+    /// Writes @p clip's value at @p time into the local pose, for the nodes
+    /// @p only marks, or every node if it is null.
+    void apply_channels(const animation_clip& clip, float time, const std::vector<char>* only);
+
+    /// Moves @p time on by @p delta_time, wrapping or stopping at the ends.
+    static void advance(float& time, float delta_time, float length, bool looping, bool& playing);
+
     void compute_world_matrices();
     void compute_joint_matrices();
 
@@ -107,6 +144,14 @@ private:
     float m_speed = 1.0f;
     bool m_playing = false;
     bool m_looping = true;
+
+    /// The overlay: its clip (-1 for none), and which nodes it poses.
+    int m_overlay_clip = -1;
+    std::vector<char> m_overlay_nodes;
+    float m_overlay_time = 0.0f;
+    float m_overlay_speed = 1.0f;
+    bool m_overlay_playing = false;
+    bool m_overlay_looping = false;
 
     static const glm::mat4 IDENTITY;
     static const std::vector<glm::mat4> NO_JOINTS;

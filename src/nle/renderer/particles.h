@@ -89,7 +89,17 @@ enum class particle_style
      * Nothing is born or dies: the ring is always full. Radius is the
      * ring's, and speed is how many turns a second, in radians.
      */
-    orbit
+    orbit,
+
+    /**
+     * @brief Round and up at once: a funnel of wind. A whirlwind.
+     *
+     * Each particle circles the emitter's axis as it climbs, its circle
+     * widening as it rises, so the whole reads as a spinning column that
+     * opens at the top. Radius is the funnel's at its widest, and about how
+     * tall it stands; speed is how fast it turns, in radians a second.
+     */
+    vortex
 };
 
 /**

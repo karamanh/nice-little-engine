@@ -191,6 +191,21 @@ void main()
         age = 0.1 + 0.1 * sin(u_time * 7.0 + index * 2.3);
         size *= 0.85 + 0.25 * sin(u_time * 6.0 + index * 1.7);
     }
+    else if(u_style == 8)
+    {
+        // Vortex: round the axis and up it at once. Narrow and quick at the
+        // foot, wider as it climbs, the way a column of wind opens out --
+        // and each particle a little in or out of the line, so it is a
+        // funnel rather than a coil of wire.
+        float ring = u_radius * (0.45 + 0.55 * age) * (0.8 + r.y * 0.4);
+        float turn = angle + u_time * u_speed + age * 3.5;
+
+        local = vec3(cos(turn) * ring,
+                     age * u_radius * 1.1 + r.z * 0.15,
+                     sin(turn) * ring);
+
+        size *= (0.5 + r.z * 0.6) * (1.0 - age * 0.45);
+    }
     else
     {
         // Spark: straight out, fast, gone. Born inside the radius for the
