@@ -224,6 +224,7 @@ void gltf_instance_3d::render(render_command_buffer& command_buffer, const rende
         if(polished)
         {
             command_buffer.set_uniform("u_sheen", glm::vec4(this->sheen_colour(), this->sheen()));
+            command_buffer.set_uniform("u_sheen_tint", this->sheen_tint());
         }
 
         command_buffer.draw_elements(static_cast<GLenum>(this->primitive_type()),
@@ -234,6 +235,7 @@ void gltf_instance_3d::render(render_command_buffer& command_buffer, const rende
         if(polished)
         {
             command_buffer.set_uniform("u_sheen", glm::vec4(0.0f));
+            command_buffer.set_uniform("u_sheen_tint", 0.0f);
         }
 
         if(faint)

@@ -68,7 +68,7 @@ namespace nle
         {
             // The whole of it polished alike: the pieces take the sheen that
             // was asked of the model.
-            ro->set_sheen(this->sheen(), this->sheen_colour());
+            ro->set_sheen(this->sheen(), this->sheen_colour(), this->sheen_tint());
             ro->set_fog_cap(this->fog_cap());
             ro->render(command_buffer, context);
         }

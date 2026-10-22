@@ -129,13 +129,18 @@ public:
      *
      * @param amount from nought, none, upwards; about one is a lot.
      * @param colour the tint of the rim and the glint.
+     * @param tint how far the surface itself takes on @p colour as well,
+     *             nought to one, at full @p amount: a frost blade blue
+     *             through, rather than steel with a blue edge. Nought keeps
+     *             the surface its own colour.
      *
      * Handed down to the pieces of something made of several, so setting it
      * on a model sets it on all of it.
      */
-    void set_sheen(float amount, const glm::vec3& colour = glm::vec3(1.0f));
+    void set_sheen(float amount, const glm::vec3& colour = glm::vec3(1.0f), float tint = 0.0f);
     float sheen() const;
     const glm::vec3& sheen_colour() const;
+    float sheen_tint() const;
 
     /**
      * @brief The most distance fog may hide this, nought to one.
@@ -180,6 +185,7 @@ private:
 
     float m_outline_width = 0.0f;
     float m_sheen = 0.0f;
+    float m_sheen_tint = 0.0f;
     float m_fog_cap = 1.0f;
     glm::vec3 m_sheen_colour = glm::vec3(1.0f);
     glm::vec3 m_outline_colour = glm::vec3(1.0f);

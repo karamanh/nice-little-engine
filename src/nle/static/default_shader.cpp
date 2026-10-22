@@ -309,6 +309,7 @@ uniform vec3 u_eye_position;
 // A polish laid over one thing: rgb its colour, w how much. Nought for
 // nearly everything, and set only round the draw of the thing that has it.
 uniform vec4 u_sheen = vec4(0.0);
+uniform float u_sheen_tint = 0.0;
 uniform float u_time;
 
 /**
@@ -501,10 +502,17 @@ void main() {
         // Kept under where bloom starts, all but the sweep: a polished thing
         // is not a lamp. The band may just cross it at the top, which is
         // what makes it read as a glint across a field.
-        vec3 polished = io_color.rgb * (1.0 + 0.3 * w)
-                      + u_sheen.rgb * w * (0.4 * rim + 0.6 * glint + 0.04);
+        // Taking on the colour through, as far as asked: the surface's own
+        // light carried in the sheen's colour, and a little of it of its own,
+        // so even its shaded side reads as frost or fire.
+        vec3 base = mix(io_color.rgb,
+                        dot(io_color.rgb, vec3(0.3, 0.55, 0.15)) * u_sheen.rgb * 1.6 + u_sheen.rgb * 0.08,
+                        u_sheen_tint * w);
 
-        vec3 lit = max(io_color.rgb, min(polished, vec3(0.97)));
+        vec3 polished = base * (1.0 + 0.3 * w)
+                      + u_sheen.rgb * w * ((0.4 + 0.5 * u_sheen_tint) * rim + 0.6 * glint + 0.04);
+
+        vec3 lit = max(base, min(polished, vec3(0.97)));
         io_color.rgb = min(lit + u_sheen.rgb * sweep * (0.25 + 0.55 * w), vec3(1.15));
     }
 

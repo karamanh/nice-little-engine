@@ -95,10 +95,16 @@ namespace nle
         return m_material_override;
     }
 
-    void render_object_3d::set_sheen(float amount, const glm::vec3& colour)
+    void render_object_3d::set_sheen(float amount, const glm::vec3& colour, float tint)
     {
         m_sheen = amount > 0.0f ? amount : 0.0f;
         m_sheen_colour = colour;
+        m_sheen_tint = tint < 0.0f ? 0.0f : (tint > 1.0f ? 1.0f : tint);
+    }
+
+    float render_object_3d::sheen_tint() const
+    {
+        return m_sheen_tint;
     }
 
     void render_object_3d::set_fog_cap(float cap)

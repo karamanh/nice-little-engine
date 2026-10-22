@@ -108,6 +108,7 @@ namespace nle
         if(polished)
         {
             command_buffer.set_uniform("u_sheen", glm::vec4(this->sheen_colour(), this->sheen()));
+            command_buffer.set_uniform("u_sheen_tint", this->sheen_tint());
         }
 
         // Draw the mesh
@@ -116,6 +117,7 @@ namespace nle
         if(polished)
         {
             command_buffer.set_uniform("u_sheen", glm::vec4(0.0f));
+            command_buffer.set_uniform("u_sheen_tint", 0.0f);
         }
 
         if(see_through)
