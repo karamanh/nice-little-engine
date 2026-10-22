@@ -348,13 +348,118 @@ humanoid find_humanoid(const bind_pose& pose)
     return body;
 }
 
-/// Pairs two chains from their roots outwards.
-void pair_chains(const std::vector<int>& source, const std::vector<int>& target,
-                 std::vector<int>& bones)
+/**
+ * @brief How big a body is, to measure its limbs against: from its hips to
+ *        the top of its neck. Every rig has those, where not every rig has
+ *        feet -- one in a robe may have been rigged without.
+ */
+float size_of(const bind_pose& pose, const humanoid& body)
 {
-    for(size_t i = 0; i < source.size() && i < target.size(); ++i)
+    const int top = !body.neck.empty() ? body.neck.back() : !body.spine.empty() ? body.spine.back() : -1;
+
+    if(body.hips < 0 || top < 0)
     {
-        bones[static_cast<size_t>(target[i])] = source[i];
+        return 1.0f;
+    }
+
+    const float size = glm::length(position_in(pose, top) - position_in(pose, body.hips));
+    return size > 1e-4f ? size : 1.0f;
+}
+
+/**
+ * @brief Each bone of a chain's stretch of it: from its own joint to the
+ *        next, measured down the limb from its root against the body's
+ *        size, so two bodies' limbs can be laid side by side. Nothing says
+ *        where the last bone ends; it is given half the one before.
+ */
+std::vector<std::pair<float, float>> spans_of(const bind_pose& pose, const std::vector<int>& chain, float size)
+{
+    std::vector<float> along(chain.size(), 0.0f);
+
+    for(size_t i = 1; i < chain.size(); ++i)
+    {
+        along[i] = along[i - 1] + glm::length(position_in(pose, chain[i]) - position_in(pose, chain[i - 1])) / size;
+    }
+
+    std::vector<std::pair<float, float>> spans;
+
+    for(size_t i = 0; i < chain.size(); ++i)
+    {
+        const float last_length = i > 0 ? (along[i] - along[i - 1]) * 0.5f : 0.1f;
+        const float end = i + 1 < chain.size() ? along[i + 1] : along[i] + std::max(last_length, 0.02f);
+
+        spans.emplace_back(along[i], end);
+    }
+
+    return spans;
+}
+
+/**
+ * @brief Pairs two chains: bone for bone when they are as long as each
+ *        other, and otherwise each by the stretch of the limb it covers.
+ *
+ * An auto-rigger that leaves a bone out of an arm -- no upper arm, so the
+ * shoulder bone reaches from the collar to the elbow -- makes a chain one
+ * shorter. Paired from the root, its every bone would take the motion of
+ * the one above it, and the arm would bend at the wrong joints. Paired by
+ * stretch, its long shoulder takes the upper arm's motion, the forearm the
+ * forearm's, and only the collarbone's is left over; a leg with no knee
+ * takes the thigh's, and a leg that stops at the knee keeps its knee.
+ */
+void pair_chains(const std::vector<int>& source, const std::vector<int>& target, std::vector<int>& bones,
+                 const bind_pose& from, float from_size, const bind_pose& to, float to_size)
+{
+    if(source.size() == target.size())
+    {
+        for(size_t i = 0; i < source.size(); ++i)
+        {
+            bones[static_cast<size_t>(target[i])] = source[i];
+        }
+
+        return;
+    }
+
+    if(source.empty() || target.empty())
+    {
+        return;
+    }
+
+    const auto theirs = spans_of(from, source, from_size);
+    const auto mine = spans_of(to, target, to_size);
+
+    // In order down the limb, each source bone used once: whichever of the
+    // ones still free shares most of this bone's stretch, or failing that
+    // starts nearest it.
+    size_t next_free = 0;
+
+    for(size_t i = 0; i < target.size() && next_free < source.size(); ++i)
+    {
+        // Leaving one for each bone still to come, where there are enough.
+        const size_t still_to_come = target.size() - 1 - i;
+        const size_t last_usable = source.size() > still_to_come
+                                       ? std::max(next_free, source.size() - 1 - still_to_come)
+                                       : source.size() - 1;
+
+        size_t best = next_free;
+        float most = 0.0f;
+        float nearest = 1e30f;
+
+        for(size_t j = next_free; j <= last_usable; ++j)
+        {
+            const float shared = std::min(mine[i].second, theirs[j].second)
+                               - std::max(mine[i].first, theirs[j].first);
+            const float apart = std::abs(mine[i].first - theirs[j].first);
+
+            if(shared > most || (most <= 0.0f && shared <= 0.0f && apart < nearest))
+            {
+                most = std::max(most, shared);
+                nearest = apart;
+                best = j;
+            }
+        }
+
+        bones[static_cast<size_t>(target[i])] = source[best];
+        next_free = best + 1;
     }
 }
 
@@ -371,11 +476,25 @@ std::vector<glm::quat> limb_alignment(const bind_pose& from, const bind_pose& to
 {
     std::vector<glm::quat> align(to.world.size(), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 
+    // The source's shoulders, the stubs from the chest to each arm.
+    const humanoid source = find_humanoid(from);
+    const auto a_shoulder = [&](int counterpart) {
+        return (!source.left_arm.empty() && counterpart == source.left_arm.front())
+            || (!source.right_arm.empty() && counterpart == source.right_arm.front());
+    };
+
     for(const auto* limb : { &body.left_arm, &body.right_arm, &body.left_leg, &body.right_leg })
     {
         // Shoulders and hip sockets excepted, for the same reason as the
         // spine: which way the stub between them points is the rigger's.
-        const size_t first = (limb == &body.left_arm || limb == &body.right_arm) ? 1 : 0;
+        // A first arm bone that answers to an upper arm is no stub, though:
+        // a rig with no upper arm reaches its shoulder from the collar to
+        // the elbow, and how that hangs is posture.
+        const bool arm = limb == &body.left_arm || limb == &body.right_arm;
+        const size_t first = arm && !limb->empty()
+                                     && (bones[static_cast<size_t>(limb->front())] < 0
+                                         || a_shoulder(bones[static_cast<size_t>(limb->front())]))
+                                 ? 1 : 0;
 
         for(size_t i = first; i < limb->size(); ++i)
         {
@@ -419,8 +538,10 @@ std::vector<int> match_humanoid_bones(const skeleton& source, const skeleton& ta
 {
     std::vector<int> bones(target.nodes().size(), -1);
 
-    const humanoid from = find_humanoid(pose_of(source));
-    const humanoid to = find_humanoid(pose_of(target));
+    const bind_pose source_pose = pose_of(source);
+    const bind_pose target_pose = pose_of(target);
+    const humanoid from = find_humanoid(source_pose);
+    const humanoid to = find_humanoid(target_pose);
 
     if(from.hips < 0 || to.hips < 0 || from.spine.empty() || to.spine.empty())
     {
@@ -441,11 +562,17 @@ std::vector<int> match_humanoid_bones(const skeleton& source, const skeleton& ta
 
     bones[static_cast<size_t>(to.spine.back())] = from.spine.back();
 
-    pair_chains(from.neck, to.neck, bones);
-    pair_chains(from.left_leg, to.left_leg, bones);
-    pair_chains(from.right_leg, to.right_leg, bones);
-    pair_chains(from.left_arm, to.left_arm, bones);
-    pair_chains(from.right_arm, to.right_arm, bones);
+    const float source_size = size_of(source_pose, from);
+    const float target_size = size_of(target_pose, to);
+
+    for(const auto& [theirs, mine] : { std::pair(&from.neck, &to.neck),
+                                       std::pair(&from.left_leg, &to.left_leg),
+                                       std::pair(&from.right_leg, &to.right_leg),
+                                       std::pair(&from.left_arm, &to.left_arm),
+                                       std::pair(&from.right_arm, &to.right_arm) })
+    {
+        pair_chains(*theirs, *mine, bones, source_pose, source_size, target_pose, target_size);
+    }
 
     return bones;
 }
