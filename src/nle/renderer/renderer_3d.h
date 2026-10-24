@@ -143,6 +143,9 @@ private:
     /// The outline pass, after everything else: see set_outline_shader.
     void draw_outlines(const ref<scene_3d>& scene, const render_context& context);
 
+    /// Everything with a glow shell, its shell: see set_glow_shell.
+    void draw_glow_shells(const ref<scene_3d>& scene, const render_context& context);
+
     bool is_visible(const ref<render_object_3d>& ro, const glm::vec3& eye,
                     const frustum& view);
 

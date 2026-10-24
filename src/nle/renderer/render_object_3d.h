@@ -158,6 +158,22 @@ public:
     float outline_width() const;
     const glm::vec3& outline_colour() const;
 
+    /**
+     * @brief A glowing shell round it: the same shape drawn again a little
+     *        larger, in one colour, adding light, from its far side only --
+     *        so it shows as a halo round its edges rather than a tint over
+     *        its face. What a game puts on an enchanted thing.
+     *
+     * @param width how far the shell stands out, as a share of the distance
+     *              to the eye, as the outline's does. Nought for none.
+     * @param colour the light it adds; brighter is stronger.
+     *
+     * Drawn with the outline shader; see renderer_3d::set_outline_shader.
+     */
+    void set_glow_shell(float width, const glm::vec3& colour = glm::vec3(1.0f));
+    float glow_shell_width() const;
+    const glm::vec3& glow_shell_colour() const;
+
     ref<class render_object_3d> scene();
 
     std::set<ref<class render_object_3d>, std::owner_less<ref<class render_object_3d>>> render_objects();
@@ -184,6 +200,8 @@ private:
     ref<class material> m_material_override;
 
     float m_outline_width = 0.0f;
+    float m_glow_shell_width = 0.0f;
+    glm::vec3 m_glow_shell_colour = glm::vec3(1.0f);
     float m_sheen = 0.0f;
     float m_sheen_tint = 0.0f;
     float m_fog_cap = 1.0f;

@@ -290,7 +290,70 @@ namespace nle
         // Execute all commands through OpenGL backend
         m_opengl_backend.execute_commands(m_command_buffer);
 
+        draw_glow_shells(scene, context);
         draw_outlines(scene, context);
+    }
+
+    void renderer_3d::draw_glow_shells(const ref<scene_3d>& scene, const render_context& context)
+    {
+        if(!m_outline_shader)
+        {
+            return;
+        }
+
+        bool any = false;
+
+        for(auto ro : scene->render_objects())
+        {
+            if(ro->glow_shell_width() <= 0.0f || !is_visible(ro, context.eye_position, context.view_frustum))
+            {
+                continue;
+            }
+
+            if(!any)
+            {
+                // Light added, not painted: behind what is in front, never
+                // hiding anything, and only its far side -- the inverted hull
+                // -- so it rings the edge rather than tinting the face.
+                any = true;
+                glEnable(GL_DEPTH_TEST);
+                glDepthMask(GL_FALSE);
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_ONE, GL_ONE);
+                glEnable(GL_CULL_FACE);
+                glCullFace(GL_FRONT);
+            }
+
+            m_outline_commands.clear();
+            ro->render(m_outline_commands, context);
+
+            m_outline_shader->use();
+
+            if(const int at = m_outline_shader->uniform_location("u_outline_width"); at != -1)
+            {
+                glUniform1f(at, ro->glow_shell_width());
+            }
+
+            if(const int at = m_outline_shader->uniform_location("u_outline_colour"); at != -1)
+            {
+                const glm::vec3& c = ro->glow_shell_colour();
+                glUniform3f(at, c.r, c.g, c.b);
+            }
+
+            m_opengl_backend.invalidate_state_cache();
+            m_opengl_backend.force_shader(m_outline_shader);
+            m_opengl_backend.execute_commands(m_outline_commands);
+            m_opengl_backend.force_shader(nullptr);
+        }
+
+        if(any)
+        {
+            glCullFace(GL_BACK);
+            glDisable(GL_CULL_FACE);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
+            m_opengl_backend.invalidate_state_cache();
+        }
     }
 
     void renderer_3d::draw_outlines(const ref<scene_3d>& scene, const render_context& context)

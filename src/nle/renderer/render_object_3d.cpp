@@ -127,6 +127,22 @@ namespace nle
         return m_sheen_colour;
     }
 
+    void render_object_3d::set_glow_shell(float width, const glm::vec3& colour)
+    {
+        m_glow_shell_width = width > 0.0f ? width : 0.0f;
+        m_glow_shell_colour = colour;
+    }
+
+    float render_object_3d::glow_shell_width() const
+    {
+        return m_glow_shell_width;
+    }
+
+    const glm::vec3& render_object_3d::glow_shell_colour() const
+    {
+        return m_glow_shell_colour;
+    }
+
     void render_object_3d::set_outline(float width, const glm::vec3& colour)
     {
         m_outline_width = width > 0.0f ? width : 0.0f;
