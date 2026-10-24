@@ -491,9 +491,10 @@ void main() {
         float rim = pow(1.0 - max(dot(normal, view_direction), 0.0), 2.0);
         vec3 towards_sun = normalize(-u_directional_light.direction);
         vec3 halfway = normalize(towards_sun + view_direction);
-        float glint = pow(max(dot(normal, halfway), 0.0), 64.0);
+        // Broader as it goes, so the brightest catch the sun over more of
+        // their surface rather than in a pinprick.
+        float glint = pow(max(dot(normal, halfway), 0.0), mix(64.0, 18.0, clamp(w - 0.5, 0.0, 1.0)));
 
-        // Kept under where bloom starts: a polished thing is not a lamp.
         // Taking on the colour through, as far as asked: the surface's own
         // light carried in the sheen's colour, and a little of it of its own,
         // so even its shaded side reads as frost or fire.
@@ -501,10 +502,14 @@ void main() {
                         dot(io_color.rgb, vec3(0.3, 0.55, 0.15)) * u_sheen.rgb * 1.6 + u_sheen.rgb * 0.08,
                         min(u_sheen_tint * w, 1.0));
 
-        vec3 polished = base * (1.0 + 0.3 * w)
-                      + u_sheen.rgb * w * ((0.4 + 0.5 * u_sheen_tint) * rim + 0.6 * glint + 0.04);
+        vec3 polished = base * (1.0 + 0.35 * w)
+                      + u_sheen.rgb * w * ((0.55 + 0.5 * u_sheen_tint) * rim + 0.9 * glint + 0.05);
 
-        io_color.rgb = max(base, min(polished, vec3(0.97)));
+        // Kept under where bloom starts up to one -- polished, not a lamp --
+        // and past it for the brightest, whose rim and glint flare.
+        float cap = mix(0.97, 1.8, clamp(w - 1.0, 0.0, 1.0));
+
+        io_color.rgb = max(base, min(polished, vec3(cap)));
     }
 
     if (u_sky.distance_fog_enabled == 1)
