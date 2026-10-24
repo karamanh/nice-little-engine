@@ -481,9 +481,9 @@ void main() {
     io_color = vec4(base_color.rgb * light_factor, base_color.a * u_material.dissolve);
 
     // A sheen, for something that has been worked on: brighter all over, a
-    // rim of light round its edge, a glint where the sun catches it, and a
-    // band of light sweeping along it -- each more, and the sweep faster,
-    // the further it has been taken. u_sheen.w is how far, nought to one.
+    // rim of light round its edge and a glint where the sun catches it, each
+    // more the further it has been taken. u_sheen.w is how far: nought to
+    // one, and past one for something taken as far as it goes.
     if (u_sheen.w > 0.0)
     {
         float w = u_sheen.w;
@@ -493,27 +493,18 @@ void main() {
         vec3 halfway = normalize(towards_sun + view_direction);
         float glint = pow(max(dot(normal, halfway), 0.0), 64.0);
 
-        // Along the world rather than the model, so it needs nothing of the
-        // mesh: a narrow band every couple of metres, moving up and across.
-        float phase = dot(io_frag_position, vec3(0.35, 1.0, 0.2)) * 3.0
-                    - u_time * (1.6 + 2.4 * w);
-        float sweep = pow(max(sin(phase), 0.0), 28.0) * smoothstep(0.25, 0.6, w);
-
-        // Kept under where bloom starts, all but the sweep: a polished thing
-        // is not a lamp. The band may just cross it at the top, which is
-        // what makes it read as a glint across a field.
+        // Kept under where bloom starts: a polished thing is not a lamp.
         // Taking on the colour through, as far as asked: the surface's own
         // light carried in the sheen's colour, and a little of it of its own,
         // so even its shaded side reads as frost or fire.
         vec3 base = mix(io_color.rgb,
                         dot(io_color.rgb, vec3(0.3, 0.55, 0.15)) * u_sheen.rgb * 1.6 + u_sheen.rgb * 0.08,
-                        u_sheen_tint * w);
+                        min(u_sheen_tint * w, 1.0));
 
         vec3 polished = base * (1.0 + 0.3 * w)
                       + u_sheen.rgb * w * ((0.4 + 0.5 * u_sheen_tint) * rim + 0.6 * glint + 0.04);
 
-        vec3 lit = max(base, min(polished, vec3(0.97)));
-        io_color.rgb = min(lit + u_sheen.rgb * sweep * (0.25 + 0.55 * w), vec3(1.15));
+        io_color.rgb = max(base, min(polished, vec3(0.97)));
     }
 
     if (u_sky.distance_fog_enabled == 1)
