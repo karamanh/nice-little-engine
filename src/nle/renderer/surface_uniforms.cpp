@@ -32,6 +32,7 @@ void record_surface_uniforms(render_command_buffer& command_buffer,
         command_buffer.set_uniform("u_material.dissolve", material->dissolve());
         command_buffer.set_uniform("u_material.accept_light", static_cast<int>(material->accept_light()));
         command_buffer.set_uniform("u_material.fog_limit", material->fog_limit());
+        command_buffer.set_uniform("u_waves", material->waves());
         accept_light = material->accept_light();
     }
     else
@@ -39,6 +40,7 @@ void record_surface_uniforms(render_command_buffer& command_buffer,
         // Uniforms belong to the program, and the last draw may have left
         // its own limit behind.
         command_buffer.set_uniform("u_material.fog_limit", 1.0f);
+        command_buffer.set_uniform("u_waves", 0.0f);
     }
 
     // Only whether to consult the lights is per-draw; their values are frame

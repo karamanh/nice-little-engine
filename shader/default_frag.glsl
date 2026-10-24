@@ -61,6 +61,19 @@ struct Sky
     vec3 distance_fog_color;
 };
 
+// Fog or cloud lying in one place -- a bowl, a marsh -- rather than
+// everywhere at a distance. See nle::fog_bank_data.
+struct FogBank
+{
+    int enabled;
+    vec3 centre;
+    float radius;
+    float bottom;
+    float top;
+    float density;
+    vec3 color;
+};
+
 // The ground, when this surface is one. Off for everything else, which is
 // everything: a prop pays one comparison and never samples any of these.
 //
@@ -218,6 +231,8 @@ uniform int u_point_light_count;
 
 uniform Material u_material;
 uniform Sky u_sky;
+uniform FogBank u_fog_bank;
+uniform float u_waves;
 uniform vec3 u_eye_position;
 
 // A polish laid over one thing: rgb its colour, w how much. Nought for
@@ -290,6 +305,108 @@ float fog_factor()
     return clamp(f, 0.0, 1.0);
 }
 
+float fog_hash(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float fog_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    return mix(mix(fog_hash(i), fog_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(fog_hash(i + vec2(0.0, 1.0)), fog_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+/**
+ * How much of this fragment the fog bank hides: the fog along the line from
+ * the eye to here, counted only where that line is inside the bank. Thickest
+ * between its bottom and top and gone at each, thinning to the edge, in
+ * billows that drift, so it reads as cloud lying there rather than as a tint.
+ */
+float fog_bank_cover()
+{
+    vec3 from = u_eye_position;
+    vec3 ray = io_frag_position - from;
+    float floor_y = u_fog_bank.centre.y + u_fog_bank.bottom;
+    float ceiling = u_fog_bank.centre.y + u_fog_bank.top;
+
+    // Only the part of the line between the bottom and the top.
+    float t0 = 0.0;
+    float t1 = 1.0;
+
+    if (abs(ray.y) > 0.0001)
+    {
+        float at_floor = (floor_y - from.y) / ray.y;
+        float at_ceiling = (ceiling - from.y) / ray.y;
+
+        t0 = max(t0, min(at_floor, at_ceiling));
+        t1 = min(t1, max(at_floor, at_ceiling));
+    }
+    else if (from.y < floor_y || from.y > ceiling)
+    {
+        return 0.0;
+    }
+
+    // And inside its edge.
+    vec2 offset = from.xz - u_fog_bank.centre.xz;
+    float a = dot(ray.xz, ray.xz);
+    float b = 2.0 * dot(offset, ray.xz);
+    float c = dot(offset, offset) - u_fog_bank.radius * u_fog_bank.radius;
+
+    if (a > 0.000001)
+    {
+        float found = b * b - 4.0 * a * c;
+
+        if (found < 0.0)
+        {
+            return 0.0;
+        }
+
+        float root = sqrt(found);
+        t0 = max(t0, (-b - root) / (2.0 * a));
+        t1 = min(t1, (-b + root) / (2.0 * a));
+    }
+    else if (c > 0.0)
+    {
+        return 0.0;
+    }
+
+    if (t1 <= t0)
+    {
+        return 0.0;
+    }
+
+    const int STEPS = 10;
+    float thickness = max(u_fog_bank.top - u_fog_bank.bottom, 0.001);
+    float step_length = (t1 - t0) * length(ray) / float(STEPS);
+    vec2 drift = vec2(0.6, 0.25) * u_time;
+    float depth = 0.0;
+
+    for (int i = 0; i < STEPS; ++i)
+    {
+        vec3 p = from + ray * mix(t0, t1, (float(i) + 0.5) / float(STEPS));
+
+        // Up from nothing at the bottom, full through the middle, and away
+        // to nothing at the top -- softer above than below, as cloud is.
+        float h = (p.y - floor_y) / thickness;
+        float body = smoothstep(0.0, 0.3, h) * (1.0 - smoothstep(0.5, 1.0, h));
+        float edge = 1.0 - smoothstep(0.65, 1.0, length(p.xz - u_fog_bank.centre.xz) / u_fog_bank.radius);
+
+        // Billows, leaning with height so they are not columns.
+        vec2 at = p.xz + vec2(p.y * 0.8, -p.y * 0.5);
+        float billows = 0.6 * fog_noise((at + drift) / 38.0) + 0.4 * fog_noise((at - drift * 1.5) / 14.0);
+
+        depth += u_fog_bank.density * body * edge * smoothstep(0.42, 0.72, billows) * 2.4 * step_length;
+    }
+
+    return 1.0 - exp(-depth);
+}
+
 /**
  * How much of this fragment the sun can actually reach.
  *
@@ -343,6 +460,30 @@ float sunlight_reaching(vec3 normal)
     return mix(0.1, 1.0, lit);
 }
 
+// The swell on water: three long waves crossing at angles, so it never
+// lines up into rows. The same here and in default_frag.glsl, which shades by
+// its slopes. Height about one either way; u_waves scales it.
+vec3 wave_at(vec2 at, float time)
+{
+    const vec2 D1 = vec2(0.80, 0.60);
+    const vec2 D2 = vec2(-0.45, 0.89);
+    const vec2 D3 = vec2(0.97, -0.24);
+    const float K1 = 0.21;
+    const float K2 = 0.33;
+    const float K3 = 0.52;
+
+    float p1 = dot(D1, at) * K1 + time * 0.6;
+    float p2 = dot(D2, at) * K2 + time * 0.85;
+    float p3 = dot(D3, at) * K3 + time * 1.1;
+
+    float height = 0.5 * sin(p1) + 0.3 * sin(p2) + 0.2 * sin(p3);
+
+    // And how fast that changes along x and along z.
+    vec2 slope = 0.5 * K1 * cos(p1) * D1 + 0.3 * K2 * cos(p2) * D2 + 0.2 * K3 * cos(p3) * D3;
+
+    return vec3(height, slope);
+}
+
 void main() {
     vec3 normal = normalize(io_normal);
     vec3 view_direction = normalize(u_eye_position - io_frag_position);
@@ -394,6 +535,34 @@ void main() {
 
     io_color = vec4(base_color.rgb * light_factor, base_color.a * u_material.dissolve);
 
+    // Water, shaded by its own waves whether or not it takes light: darker
+    // in the troughs facing away, a glint where a slope turns the sun to the
+    // eye, and the sky's pale towards the horizon, where water is a mirror.
+    if (u_waves > 0.0)
+    {
+        vec3 wave = wave_at(io_frag_position.xz, u_time);
+
+        // Ripples on the swell, too small for the mesh to carry.
+        vec2 ripple = vec2(fog_noise(io_frag_position.xz * 0.9 + u_time * 0.8),
+                           fog_noise(io_frag_position.zx * 0.9 - u_time * 0.6)) - 0.5;
+
+        // Steeper than the swell really is, for the light only: a slope of a
+        // few degrees does not show, and the mesh already carries the height.
+        vec3 surface = normalize(vec3(-(4.0 * u_waves * wave.y + 0.3 * ripple.x), 1.0,
+                                      -(4.0 * u_waves * wave.z + 0.3 * ripple.y)));
+
+        vec3 towards_sun = normalize(u_directional_light.direction);
+        float facing = dot(surface, towards_sun);
+        float glint = pow(max(dot(reflect(-towards_sun, surface), view_direction), 0.0), 90.0);
+        float mirror = pow(1.0 - max(dot(surface, view_direction), 0.0), 4.0);
+
+        vec3 water = io_color.rgb * (0.75 + 0.55 * facing);
+        water = mix(water, u_sky.distance_fog_color, mirror * 0.55);
+        water += u_directional_light.color * glint * 0.7;
+
+        io_color = vec4(water, min(io_color.a + mirror * 0.3 + glint, 1.0));
+    }
+
     // A sheen, for something that has been worked on: brighter all over, a
     // rim of light round its edge and a glint where the sun catches it, each
     // more the further it has been taken. u_sheen.w is how far: nought to
@@ -430,5 +599,13 @@ void main() {
     {
         io_color.rgb = mix(io_color.rgb, u_sky.distance_fog_color,
                            min(fog_factor(), u_material.fog_limit));
+    }
+
+    // After the haze of distance, not before: a cloud in the bowl is
+    // nearer than the hills far off behind it, and hides them as it hides
+    // the sky.
+    if (u_fog_bank.enabled == 1)
+    {
+        io_color.rgb = mix(io_color.rgb, u_fog_bank.color, fog_bank_cover());
     }
 }

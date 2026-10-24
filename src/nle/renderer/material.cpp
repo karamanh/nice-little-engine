@@ -78,6 +78,16 @@ namespace nle
         return m_fog_limit;
     }
 
+    void material::set_waves(float height)
+    {
+        m_waves = height < 0.0f ? 0.0f : height;
+    }
+
+    float material::waves() const
+    {
+        return m_waves;
+    }
+
     void material::set_accept_light(bool accept)
     {
         m_accept_light = accept;

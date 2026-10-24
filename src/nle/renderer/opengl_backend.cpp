@@ -181,6 +181,16 @@ void opengl_backend::upload_frame_uniforms(const ref<class shader>& shader)
     set_float("u_sky.distance_fog_near", m_context.fog.near_distance);
     set_float("u_sky.distance_fog_far", m_context.fog.far_distance);
     set_vec3("u_sky.distance_fog_color", m_context.fog.color);
+
+    const fog_bank_data& bank = m_context.fog.bank;
+
+    set_int("u_fog_bank.enabled", bank.enabled ? 1 : 0);
+    set_vec3("u_fog_bank.centre", bank.centre);
+    set_float("u_fog_bank.radius", bank.radius);
+    set_float("u_fog_bank.bottom", bank.bottom);
+    set_float("u_fog_bank.top", bank.top);
+    set_float("u_fog_bank.density", bank.density);
+    set_vec3("u_fog_bank.color", bank.color);
 }
 
 void opengl_backend::force_shader(ref<class shader> shader)

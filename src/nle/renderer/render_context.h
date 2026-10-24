@@ -56,6 +56,37 @@ struct point_light_data
     float range = 50.0f;
 };
 
+/**
+ * @brief Fog or cloud lying in one place: a bowl, a marsh, a valley.
+ *
+ * Not distance fog, which hides what is far off everywhere alike. This is a
+ * body of fog with a bottom, a top and an edge -- a slice of a cylinder round
+ * @p centre -- thickest between the two and thinning to nothing at each and
+ * towards the edge, drifting in patches. Whatever is looked at through it is
+ * hidden by as much of it as the line of sight crosses. With a bottom above
+ * the ground it is a cloud: clear air underneath, something huge flying in
+ * and out of it overhead.
+ */
+struct fog_bank_data
+{
+    bool enabled = false;
+
+    /// Where it lies: the middle, and the height of its floor.
+    glm::vec3 centre = glm::vec3(0.0f);
+
+    /// How far out it reaches, thinning towards the edge.
+    float radius = 100.0f;
+
+    /// How far above the floor it starts, and how far up it is gone.
+    float bottom = 0.0f;
+    float top = 10.0f;
+
+    /// How thick it is at its thickest: how much of a metre of it hides.
+    float density = 0.02f;
+
+    glm::vec3 color = glm::vec3(0.8f);
+};
+
 struct fog_data
 {
     bool enabled = false;
@@ -63,6 +94,8 @@ struct fog_data
     float far_distance = 1000.0f;
     /// colour fragments fade towards at far_distance.
     glm::vec3 color = glm::vec3(1.0f);
+
+    fog_bank_data bank;
 };
 
 /**

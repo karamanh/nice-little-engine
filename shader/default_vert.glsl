@@ -16,6 +16,10 @@ uniform mat4 u_light_space;
 // Skinning. u_joint_matrices holds, for the skin this draw belongs to,
 // joint_world_matrix * inverse_bind_matrix for every joint.
 uniform int u_skinning_enabled;
+
+uniform float u_waves;
+uniform float u_time;
+
 uniform mat4 u_joint_matrices[NLE_MAX_JOINTS];
 
 layout (location = 0) in vec3 position;
@@ -48,6 +52,30 @@ mat4 skin_matrix()
     return skin / total;
 }
 
+// The swell on water: three long waves crossing at angles, so it never
+// lines up into rows. The same here and in default_frag.glsl, which shades by
+// its slopes. Height about one either way; u_waves scales it.
+vec3 wave_at(vec2 at, float time)
+{
+    const vec2 D1 = vec2(0.80, 0.60);
+    const vec2 D2 = vec2(-0.45, 0.89);
+    const vec2 D3 = vec2(0.97, -0.24);
+    const float K1 = 0.21;
+    const float K2 = 0.33;
+    const float K3 = 0.52;
+
+    float p1 = dot(D1, at) * K1 + time * 0.6;
+    float p2 = dot(D2, at) * K2 + time * 0.85;
+    float p3 = dot(D3, at) * K3 + time * 1.1;
+
+    float height = 0.5 * sin(p1) + 0.3 * sin(p2) + 0.2 * sin(p3);
+
+    // And how fast that changes along x and along z.
+    vec2 slope = 0.5 * K1 * cos(p1) * D1 + 0.3 * K2 * cos(p2) * D2 + 0.2 * K3 * cos(p3) * D3;
+
+    return vec3(height, slope);
+}
+
 void main() {
     mat4 model = u_model;
 
@@ -57,6 +85,11 @@ void main() {
     }
 
     vec4 world_position = model * vec4(position, 1.0);
+
+    if (u_waves > 0.0)
+    {
+        world_position.y += u_waves * wave_at(world_position.xz, u_time).x;
+    }
 
     gl_Position = u_projection * u_view * world_position;
     io_texture_coordinates = texture;

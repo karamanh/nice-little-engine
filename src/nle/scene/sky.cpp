@@ -4,6 +4,8 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
+
 #include <cmath>
 
 namespace nle
@@ -51,6 +53,111 @@ uniform float u_sun_glow;
 
 uniform float u_stars;
 uniform float u_time;
+
+// The fog bank, as default_frag.glsl has it: cloud lying in one place is
+// seen against the sky as well as against whatever is behind it.
+uniform vec3 u_eye_position;
+uniform int u_fog_bank_enabled;
+uniform vec3 u_fog_bank_centre;
+uniform float u_fog_bank_radius;
+uniform float u_fog_bank_bottom;
+uniform float u_fog_bank_top;
+uniform float u_fog_bank_density;
+uniform vec3 u_fog_bank_color;
+
+float fog_hash(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float fog_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    return mix(mix(fog_hash(i), fog_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(fog_hash(i + vec2(0.0, 1.0)), fog_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+// The same sum as default_frag.glsl's fog_bank_cover, along a line out to
+// the far side of the bank rather than to a surface.
+float fog_bank_cover(vec3 dir)
+{
+    vec3 from = u_eye_position;
+    float reach = 2.0 * u_fog_bank_radius + length(from.xz - u_fog_bank_centre.xz);
+    vec3 ray = dir * reach;
+    float floor_y = u_fog_bank_centre.y + u_fog_bank_bottom;
+    float ceiling = u_fog_bank_centre.y + u_fog_bank_top;
+
+    float t0 = 0.0;
+    float t1 = 1.0;
+
+    if (abs(ray.y) > 0.0001)
+    {
+        float at_floor = (floor_y - from.y) / ray.y;
+        float at_ceiling = (ceiling - from.y) / ray.y;
+
+        t0 = max(t0, min(at_floor, at_ceiling));
+        t1 = min(t1, max(at_floor, at_ceiling));
+    }
+    else if (from.y < floor_y || from.y > ceiling)
+    {
+        return 0.0;
+    }
+
+    vec2 offset = from.xz - u_fog_bank_centre.xz;
+    float a = dot(ray.xz, ray.xz);
+    float b = 2.0 * dot(offset, ray.xz);
+    float c = dot(offset, offset) - u_fog_bank_radius * u_fog_bank_radius;
+
+    if (a > 0.000001)
+    {
+        float found = b * b - 4.0 * a * c;
+
+        if (found < 0.0)
+        {
+            return 0.0;
+        }
+
+        float root = sqrt(found);
+        t0 = max(t0, (-b - root) / (2.0 * a));
+        t1 = min(t1, (-b + root) / (2.0 * a));
+    }
+    else if (c > 0.0)
+    {
+        return 0.0;
+    }
+
+    if (t1 <= t0)
+    {
+        return 0.0;
+    }
+
+    const int STEPS = 10;
+    float thickness = max(u_fog_bank_top - u_fog_bank_bottom, 0.001);
+    float step_length = (t1 - t0) * reach / float(STEPS);
+    vec2 drift = vec2(0.6, 0.25) * u_time;
+    float depth = 0.0;
+
+    for (int i = 0; i < STEPS; ++i)
+    {
+        vec3 p = from + ray * mix(t0, t1, (float(i) + 0.5) / float(STEPS));
+
+        float h = (p.y - floor_y) / thickness;
+        float body = smoothstep(0.0, 0.3, h) * (1.0 - smoothstep(0.5, 1.0, h));
+        float edge = 1.0 - smoothstep(0.65, 1.0, length(p.xz - u_fog_bank_centre.xz) / u_fog_bank_radius);
+
+        vec2 at = p.xz + vec2(p.y * 0.8, -p.y * 0.5);
+        float billows = 0.6 * fog_noise((at + drift) / 38.0) + 0.4 * fog_noise((at - drift * 1.5) / 14.0);
+
+        depth += u_fog_bank_density * body * edge * smoothstep(0.42, 0.72, billows) * 2.4 * step_length;
+    }
+
+    return 1.0 - exp(-depth);
+}
 
 float hash(vec3 p)
 {
@@ -101,6 +208,11 @@ void main()
     float halo = u_sun_glow * 0.35 * pow(max(toward, 0.0), 3.0) * (1.0 - clamp(up, 0.0, 1.0));
 
     colour += u_sun_color * (disc * 2.5 + glow + halo);
+
+    if (u_fog_bank_enabled == 1)
+    {
+        colour = mix(colour, u_fog_bank_color, fog_bank_cover(dir));
+    }
 
     frag_color = vec4(colour, 1.0);
 }
@@ -180,6 +292,17 @@ void sky::render(render_command_buffer& command_buffer, const render_context& co
 
     command_buffer.set_uniform("u_stars", std::max(m_settings.stars, 0.0f));
     command_buffer.set_uniform("u_time", context.time);
+
+    const fog_bank_data& bank = context.fog.bank;
+
+    command_buffer.set_uniform("u_eye_position", context.eye_position);
+    command_buffer.set_uniform("u_fog_bank_enabled", bank.enabled ? 1 : 0);
+    command_buffer.set_uniform("u_fog_bank_centre", bank.centre);
+    command_buffer.set_uniform("u_fog_bank_radius", std::max(bank.radius, 1.0f));
+    command_buffer.set_uniform("u_fog_bank_bottom", bank.bottom);
+    command_buffer.set_uniform("u_fog_bank_top", bank.top);
+    command_buffer.set_uniform("u_fog_bank_density", bank.density);
+    command_buffer.set_uniform("u_fog_bank_color", bank.color);
 
     command_buffer.set_depth_mask(false);
     command_buffer.draw_elements(GL_TRIANGLES, mesh()->vao(), mesh()->ebo(), mesh()->indices().size());
