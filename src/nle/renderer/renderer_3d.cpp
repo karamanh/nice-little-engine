@@ -103,8 +103,74 @@ namespace nle
                                                            context.view_frustum);
 
         context.fog = scene->fog();
+        context.fog.banks = banks_in_sight(context.fog, context.eye_position, context.view_frustum);
 
         return context;
+    }
+
+    std::vector<fog_bank_data> renderer_3d::banks_in_sight(const fog_data& fog, const glm::vec3& eye,
+                                                           const frustum& view)
+    {
+        // Past this a bank is not worth its cost: it is a smudge at the
+        // bottom of the view at best, and every pixel would still pay for it.
+        // Nearer still where the distance fog has already hidden everything.
+        constexpr float FARTHEST = 600.0f;
+        const float reach = fog.enabled ? std::min(FARTHEST, fog.far_distance) : FARTHEST;
+
+        std::vector<std::pair<float, fog_bank_data>> kept;
+
+        for(fog_bank_data bank : fog.banks)
+        {
+            if(!bank.enabled || bank.density <= 0.0f)
+            {
+                continue;
+            }
+
+            // How far to its nearest edge, along the ground; nought from
+            // inside it, ring or not.
+            const float across = glm::length(glm::vec2(eye.x - bank.centre.x, eye.z - bank.centre.z));
+            const float to_edge = std::max(0.0f, across - bank.radius);
+
+            if(to_edge >= reach)
+            {
+                continue;
+            }
+
+            // And whether it is anywhere in front of the camera.
+            const float half_tall = (bank.top - bank.bottom) * 0.5f;
+            const glm::vec3 middle(bank.centre.x, bank.centre.y + bank.bottom + half_tall, bank.centre.z);
+
+            if(!view.holds(middle, std::sqrt(bank.radius * bank.radius + half_tall * half_tall)))
+            {
+                continue;
+            }
+
+            // Thinning in over the last quarter of the way, so one does not
+            // appear all at once as you walk towards it.
+            const float fade = std::clamp((reach - to_edge) / (reach * 0.25f), 0.0f, 1.0f);
+            bank.density *= fade * fade * (3.0f - 2.0f * fade);
+
+            kept.emplace_back(across, bank);
+        }
+
+        // Farthest first: the shaders lay them over the picture in order, so
+        // the nearest must come last to be in front.
+        std::sort(kept.begin(), kept.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+
+        if(kept.size() > static_cast<size_t>(MAX_FOG_BANKS))
+        {
+            kept.erase(kept.begin(), kept.end() - MAX_FOG_BANKS);
+        }
+
+        std::vector<fog_bank_data> banks;
+        banks.reserve(kept.size());
+
+        for(auto& [far, bank] : kept)
+        {
+            banks.push_back(bank);
+        }
+
+        return banks;
     }
 
     bool renderer_3d::is_visible(const ref<render_object_3d>& ro, const glm::vec3& eye,

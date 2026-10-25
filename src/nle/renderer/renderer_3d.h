@@ -40,6 +40,17 @@ struct render_layer_attribute
 class renderer_3d
 {
 public:
+    /**
+     * @brief The fog banks worth drawing this frame: near enough to be seen
+     *        and somewhere in front of the camera, thinned as they near the
+     *        limit, farthest first.
+     *
+     * Every pixel of the world and the sky tests every bank it is given, so
+     * a bank behind the camera or across the map is cost and nothing else.
+     */
+    static std::vector<fog_bank_data> banks_in_sight(const fog_data& fog, const glm::vec3& eye,
+                                                     const frustum& view);
+
     renderer_3d(ref<window_glfw> render_target);
     virtual ~renderer_3d();
 
