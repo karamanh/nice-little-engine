@@ -179,6 +179,16 @@ public:
      */
     void set_thin_with_distance(bool thin);
 
+    /**
+     * @brief Laid over what is behind them rather than added to it.
+     *
+     * Particles add light, which is right for fire and frost and sparks and
+     * means a dark one cannot be seen at all. Dark ones -- storm cloud,
+     * smoke -- are drawn this way instead: their colour, as solid as the
+     * intensity says, nought to one, over whatever is there.
+     */
+    void set_dark(bool dark);
+
     void render(render_command_buffer& command_buffer, const render_context& context) override;
 
     /// Light casts no shadow -- and drawn into the shadow pass, a fire aged
@@ -211,6 +221,7 @@ private:
     glm::vec3 m_span = glm::vec3(0.0f);
     float m_intensity = 1.0f;
     bool m_thin_with_distance = false;
+    bool m_dark = false;
 
     /// Counts up, and is what the whole simulation is a function of.
     float m_clock = 0.0f;

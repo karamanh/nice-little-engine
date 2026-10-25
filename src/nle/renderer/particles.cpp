@@ -48,6 +48,7 @@ uniform int   u_style;
 
 out float v_age;
 out vec2  v_corner;
+out float v_tone;
 
 /// Three uncorrelated numbers in [0,1) from one index. Cheap and good enough
 /// that no two particles of a few hundred visibly share a path.
@@ -256,6 +257,7 @@ void main()
 
     v_age = age;
     v_corner = a_corner;
+    v_tone = r.y;
 }
 )";
 
@@ -271,11 +273,13 @@ const char* PARTICLE_FRAGMENT = R"(
 
 in float v_age;
 in vec2  v_corner;
+in float v_tone;
 
 uniform vec3  u_born;
 uniform vec3  u_dying;
 uniform float u_intensity;
 uniform int   u_style;
+uniform int   u_dark;
 
 out vec4 frag_color;
 
@@ -313,6 +317,23 @@ void main()
     }
 
     vec3 colour = mix(u_born, u_dying, v_age);
+
+    // Mist is many wisps, not one colour: each its own shade, lighter or
+    // darker, some leaning blue and some purple, so it reads as cloud with
+    // depth to it rather than a flat smear.
+    if(u_style == 9)
+    {
+        vec3 lean = mix(vec3(0.85, 0.95, 1.25), vec3(1.15, 0.88, 1.2), v_tone);
+        colour *= lean * mix(0.6, 1.45, fract(v_tone * 7.31));
+    }
+
+    // Dark ones are laid over, as solid as their intensity says, rather than
+    // added: added, a dark colour is nothing at all.
+    if(u_dark == 1)
+    {
+        frag_color = vec4(colour, fall * life * u_intensity);
+        return;
+    }
 
     frag_color = vec4(colour * u_intensity, fall * life * life);
 }
@@ -453,6 +474,11 @@ void particle_emitter::set_thin_with_distance(bool thin)
     m_thin_with_distance = thin;
 }
 
+void particle_emitter::set_dark(bool dark)
+{
+    m_dark = dark;
+}
+
 void particle_emitter::render(render_command_buffer& command_buffer,
                               const render_context& context)
 {
@@ -500,12 +526,13 @@ void particle_emitter::render(render_command_buffer& command_buffer,
     command_buffer.set_uniform("u_born", m_born);
     command_buffer.set_uniform("u_dying", m_dying);
     command_buffer.set_uniform("u_intensity", m_intensity);
+    command_buffer.set_uniform("u_dark", m_dark ? 1 : 0);
 
     // Added to what is already there, and writing no depth: overlapping
     // particles should brighten each other rather than the nearest one
     // hiding the rest, and a cloud of them should not stop the world behind
     // it being drawn.
-    command_buffer.set_blending(blend_mode::additive);
+    command_buffer.set_blending(m_dark ? blend_mode::alpha : blend_mode::additive);
     command_buffer.set_depth_mask(false);
 
     command_buffer.draw_elements_instanced(GL_TRIANGLES, g_vao, g_ebo, 6, drawn);
