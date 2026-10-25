@@ -32,6 +32,11 @@ window_glfw::window_glfw(unsigned int width, unsigned int height, const std::str
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
+    // Switching to another window leaves this one where it is rather than
+    // minimising it. Minimised, it is nought by nought, and coming back to
+    // it was a mode change, a black screen and a window rebuilt.
+    glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);
+
     m_handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
     glfwMakeContextCurrent(m_handle);
 
@@ -71,17 +76,23 @@ void window_glfw::display()
 
         glfwGetWindowSize(m_handle, &m_width, &m_height);
 
+        // Minimised there is nothing to draw on, and drawing on nought by
+        // nought is where the trouble was: everything sized by the window
+        // is sized nought. The game goes on -- it is still connected, and
+        // the world does not stop -- it is only not drawn.
+        const bool showing = m_width > 0 && m_height > 0 && !glfwGetWindowAttrib(m_handle, GLFW_ICONIFIED);
+
         if(update())
         {
             update()(delta_time);
         }
 
-        if(render_3d())
+        if(render_3d() && showing)
         {
             render_3d()();
         }
 
-        if(render_ui())
+        if(render_ui() && showing)
         {
             render_ui()();
         }
@@ -213,11 +224,23 @@ void window_glfw::set_fullscreen(bool fullscreen)
 
     if((m_fullscreen = fullscreen))
     {
-        const GLFWvidmode * vm = glfwGetVideoMode(monitor);
-        glfwSetWindowMonitor(m_handle, monitor, 0, 0, vm->width, vm->height, vm->refreshRate);
+        // A window with no frame over the whole screen, not the screen
+        // taken over. It looks the same; but switching away from it is
+        // switching windows, with no change of mode on the way out or back,
+        // which is what made alt-tab flicker, go black or take seconds.
+        int mx = 0;
+        int my = 0;
+        glfwGetMonitorPos(monitor, &mx, &my);
+
+        const GLFWvidmode* vm = glfwGetVideoMode(monitor);
+
+        glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_FALSE);
+        glfwSetWindowMonitor(m_handle, nullptr, mx, my, vm->width, vm->height, 0);
     }
     else
     {
+        glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_TRUE);
+
         // Back to a window in the middle of that same screen.
         int mx = 0;
         int my = 0;
