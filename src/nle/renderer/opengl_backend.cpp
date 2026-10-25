@@ -182,15 +182,23 @@ void opengl_backend::upload_frame_uniforms(const ref<class shader>& shader)
     set_float("u_sky.distance_fog_far", m_context.fog.far_distance);
     set_vec3("u_sky.distance_fog_color", m_context.fog.color);
 
-    const fog_bank_data& bank = m_context.fog.bank;
+    const fog_bank_data* banks[2] = { &m_context.fog.bank, &m_context.fog.valley };
 
-    set_int("u_fog_bank.enabled", bank.enabled ? 1 : 0);
-    set_vec3("u_fog_bank.centre", bank.centre);
-    set_float("u_fog_bank.radius", bank.radius);
-    set_float("u_fog_bank.bottom", bank.bottom);
-    set_float("u_fog_bank.top", bank.top);
-    set_float("u_fog_bank.density", bank.density);
-    set_vec3("u_fog_bank.color", bank.color);
+    for(int i = 0; i < 2; ++i)
+    {
+        const fog_bank_data& bank = *banks[i];
+        const std::string at = "u_fog_banks[" + std::to_string(i) + "].";
+
+        set_int(at + "enabled", bank.enabled ? 1 : 0);
+        set_vec3(at + "centre", bank.centre);
+        set_float(at + "radius", std::max(bank.radius, 1.0f));
+        set_float(at + "inner", std::max(bank.inner_radius, 0.0f));
+        set_float(at + "bottom", bank.bottom);
+        set_float(at + "top", bank.top);
+        set_float(at + "density", bank.density);
+        set_float(at + "billow", std::max(bank.billow, 1.0f));
+        set_vec3(at + "color", bank.color);
+    }
 }
 
 void opengl_backend::force_shader(ref<class shader> shader)

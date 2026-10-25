@@ -61,16 +61,19 @@ struct Sky
     vec3 distance_fog_color;
 };
 
-// Fog or cloud lying in one place -- a bowl, a marsh -- rather than
-// everywhere at a distance. See nle::fog_bank_data.
+// Fog or cloud lying in one place -- a bowl, a marsh, a ring of valleys
+// round a place -- rather than everywhere at a distance. See
+// nle::fog_bank_data.
 struct FogBank
 {
     int enabled;
     vec3 centre;
     float radius;
+    float inner;
     float bottom;
     float top;
     float density;
+    float billow;
     vec3 color;
 };
 
@@ -231,7 +234,8 @@ uniform int u_point_light_count;
 
 uniform Material u_material;
 uniform Sky u_sky;
-uniform FogBank u_fog_bank;
+// The level's own bank, and the cloud lying in the valleys round it.
+uniform FogBank u_fog_banks[2];
 uniform float u_waves;
 uniform vec3 u_eye_position;
 
@@ -323,13 +327,12 @@ float fog_noise(vec2 p)
 }
 
 /**
- * The colour of the fog bank at one place in it: darker low down and in the
+ * The colour of a fog bank at one place in it: darker low down and in the
  * thick of a billow, paler towards its top, and over the whole of it slow
  * patches a little bluer or a little browner, the way storm cloud is.
  */
-vec3 fog_bank_shade(vec3 p, float h, float billows)
+vec3 fog_bank_shade(vec3 base, vec3 p, float h, float billows)
 {
-    vec3 base = u_fog_bank.color;
     float lit = clamp(0.15 + 0.95 * h - 0.9 * (billows - 0.55), 0.0, 1.0);
     vec3 shade = mix(base * vec3(0.36, 0.37, 0.43), base * 1.12, lit);
 
@@ -340,22 +343,18 @@ vec3 fog_bank_shade(vec3 p, float h, float billows)
 }
 
 /**
- * What the fog bank puts over this fragment: the colour of the cloud in rgb
+ * What a fog bank puts over this fragment: the colour of the cloud in rgb
  * and how much of the fragment it hides in a. The fog along the line from
  * the eye to here, counted only where that line is inside the bank. Thickest
  * between its bottom and top and gone at each, thinning to the edge, in
  * billows that drift, so it reads as cloud lying there rather than as a tint.
- *
- * Not one colour: dark slate underneath and in the thick of it, paler where
- * it thins at the top, and drifting patches a little cooler or warmer, so it
- * is weather and not a painted sky. See fog_bank_shade.
  */
-vec4 fog_bank_cover()
+vec4 fog_bank_cover(FogBank bank)
 {
     vec3 from = u_eye_position;
     vec3 ray = io_frag_position - from;
-    float floor_y = u_fog_bank.centre.y + u_fog_bank.bottom;
-    float ceiling = u_fog_bank.centre.y + u_fog_bank.top;
+    float floor_y = bank.centre.y + bank.bottom;
+    float ceiling = bank.centre.y + bank.top;
 
     // Only the part of the line between the bottom and the top.
     float t0 = 0.0;
@@ -375,10 +374,10 @@ vec4 fog_bank_cover()
     }
 
     // And inside its edge.
-    vec2 offset = from.xz - u_fog_bank.centre.xz;
+    vec2 offset = from.xz - bank.centre.xz;
     float a = dot(ray.xz, ray.xz);
     float b = 2.0 * dot(offset, ray.xz);
-    float c = dot(offset, offset) - u_fog_bank.radius * u_fog_bank.radius;
+    float c = dot(offset, offset) - bank.radius * bank.radius;
 
     if (a > 0.000001)
     {
@@ -392,6 +391,15 @@ vec4 fog_bank_cover()
         float root = sqrt(found);
         t0 = max(t0, (-b - root) / (2.0 * a));
         t1 = min(t1, (-b + root) / (2.0 * a));
+
+        // A ring with the eye in its hole: start where the line comes out
+        // of the hole, so every step is spent where there can be cloud.
+        float hole = dot(offset, offset) - bank.inner * bank.inner;
+
+        if (bank.inner > 0.0 && hole < 0.0)
+        {
+            t0 = max(t0, (-b + sqrt(b * b - 4.0 * a * hole)) / (2.0 * a));
+        }
     }
     else if (c > 0.0)
     {
@@ -404,9 +412,9 @@ vec4 fog_bank_cover()
     }
 
     const int STEPS = 10;
-    float thickness = max(u_fog_bank.top - u_fog_bank.bottom, 0.001);
+    float thickness = max(bank.top - bank.bottom, 0.001);
     float step_length = (t1 - t0) * length(ray) / float(STEPS);
-    vec2 drift = vec2(0.6, 0.25) * u_time;
+    vec2 drift = vec2(0.6, 0.25) * u_time * (bank.billow / 38.0);
     vec3 colour = vec3(0.0);
     float through = 1.0;
 
@@ -418,17 +426,22 @@ vec4 fog_bank_cover()
         // to nothing at the top -- softer above than below, as cloud is.
         float h = (p.y - floor_y) / thickness;
         float body = smoothstep(0.0, 0.3, h) * (1.0 - smoothstep(0.5, 1.0, h));
-        float edge = 1.0 - smoothstep(0.65, 1.0, length(p.xz - u_fog_bank.centre.xz) / u_fog_bank.radius);
+
+        // Thinning to its edge, and to its hole if it is a ring.
+        float out_from = length(p.xz - bank.centre.xz);
+        float edge = (1.0 - smoothstep(0.65, 1.0, out_from / bank.radius))
+                   * smoothstep(bank.inner, bank.inner * 1.2 + 0.001, out_from);
 
         // Billows, leaning with height so they are not columns.
         vec2 at = p.xz + vec2(p.y * 0.8, -p.y * 0.5);
-        float billows = 0.6 * fog_noise((at + drift) / 38.0) + 0.4 * fog_noise((at - drift * 1.5) / 14.0);
+        float billows = 0.6 * fog_noise((at + drift) / bank.billow)
+                      + 0.4 * fog_noise((at - drift * 1.5) / (bank.billow * 0.37));
 
-        float thick = u_fog_bank.density * body * edge * smoothstep(0.42, 0.72, billows) * 2.4 * step_length;
+        float thick = bank.density * body * edge * smoothstep(0.42, 0.72, billows) * 2.4 * step_length;
         float taken = 1.0 - exp(-thick);
 
         // Front to back, so what is nearer covers what is behind it.
-        colour += through * taken * fog_bank_shade(p, h, billows);
+        colour += through * taken * fog_bank_shade(bank.color, p, h, billows);
         through *= 1.0 - taken;
     }
 
@@ -634,9 +647,13 @@ void main() {
     // After the haze of distance, not before: a cloud in the bowl is
     // nearer than the hills far off behind it, and hides them as it hides
     // the sky.
-    if (u_fog_bank.enabled == 1)
+    // The valleys' first, which lie further off, then the level's own.
+    for (int i = 1; i >= 0; --i)
     {
-        vec4 cloud = fog_bank_cover();
-        io_color.rgb = mix(io_color.rgb, cloud.rgb, cloud.a);
+        if (u_fog_banks[i].enabled == 1)
+        {
+            vec4 cloud = fog_bank_cover(u_fog_banks[i]);
+            io_color.rgb = mix(io_color.rgb, cloud.rgb, cloud.a);
+        }
     }
 }

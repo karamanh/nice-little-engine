@@ -77,6 +77,13 @@ struct fog_bank_data
     /// How far out it reaches, thinning towards the edge.
     float radius = 100.0f;
 
+    /**
+     * @brief Clear inside this far from the middle: a ring rather than a
+     *        disc, for cloud lying among the mountains round a place and not
+     *        over it. Nought for a disc.
+     */
+    float inner_radius = 0.0f;
+
     /// How far above the floor it starts, and how far up it is gone.
     float bottom = 0.0f;
     float top = 10.0f;
@@ -85,6 +92,10 @@ struct fog_bank_data
     float density = 0.02f;
 
     glm::vec3 color = glm::vec3(0.8f);
+
+    /// How big its billows are across, in metres: small for a bowl, large
+    /// for weather lying over a range.
+    float billow = 38.0f;
 };
 
 struct fog_data
@@ -96,6 +107,9 @@ struct fog_data
     glm::vec3 color = glm::vec3(1.0f);
 
     fog_bank_data bank;
+
+    /// The cloud lying in the valleys round the level, among its mountains.
+    fog_bank_data valley;
 };
 
 /**
