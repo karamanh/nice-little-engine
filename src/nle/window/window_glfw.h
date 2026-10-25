@@ -32,8 +32,8 @@ public:
     void display();
     void close();
 
-    void set_fullscreen(bool fullscreen);
-    bool fullscreen();
+    void set_mode(window_mode mode) override;
+    window_mode mode() const override;
 
     void set_cursor_visibility(bool visible);
     bool cursor_visibility();

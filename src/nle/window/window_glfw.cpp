@@ -33,8 +33,7 @@ window_glfw::window_glfw(unsigned int width, unsigned int height, const std::str
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
     // Switching to another window leaves this one where it is rather than
-    // minimising it. Minimised, it is nought by nought, and coming back to
-    // it was a mode change, a black screen and a window rebuilt.
+    // minimising it, unless it has taken the screen over: see set_mode.
     glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);
 
     m_handle = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
@@ -215,50 +214,80 @@ int window_glfw::refresh_rate() const
     return mode != nullptr ? mode->refreshRate : 60;
 }
 
-void window_glfw::set_fullscreen(bool fullscreen)
+void window_glfw::set_mode(window_mode mode)
 {
     // On the screen the window is on, not the system's first: a laptop with
     // a monitor beside it went fullscreen on the laptop whichever screen the
     // game had been moved to.
     GLFWmonitor* monitor = current_monitor();
+    const GLFWvidmode* vm = glfwGetVideoMode(monitor);
 
-    if((m_fullscreen = fullscreen))
+    int mx = 0;
+    int my = 0;
+    glfwGetMonitorPos(monitor, &mx, &my);
+
+    m_mode = mode;
+
+    switch(mode)
     {
-        // A window with no frame over the whole screen, not the screen
-        // taken over. It looks the same; but switching away from it is
-        // switching windows, with no change of mode on the way out or back,
-        // which is what made alt-tab flicker, go black or take seconds.
-        int mx = 0;
-        int my = 0;
-        glfwGetMonitorPos(monitor, &mx, &my);
+        case window_mode::fullscreen:
+        {
+            // The screen taken over, at the mode it is already in so nothing
+            // changes on the way in. On Windows minimised when something else
+            // is switched to, which is what taking the screen over means
+            // there. Not on Linux, where a window that is not yet in front
+            // when it goes fullscreen minimised itself before it had begun.
+#ifdef _WIN32
+            glfwSetWindowAttrib(m_handle, GLFW_AUTO_ICONIFY, GLFW_TRUE);
+#else
+            glfwSetWindowAttrib(m_handle, GLFW_AUTO_ICONIFY, GLFW_FALSE);
+#endif
+            glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_TRUE);
+            glfwSetWindowMonitor(m_handle, monitor, 0, 0, vm->width, vm->height, vm->refreshRate);
+            break;
+        }
 
-        const GLFWvidmode* vm = glfwGetVideoMode(monitor);
+        case window_mode::borderless:
+        {
+            // A window with no frame over the whole screen. Switching away
+            // from it is switching windows: no change of mode on the way
+            // out or back.
+            glfwSetWindowAttrib(m_handle, GLFW_AUTO_ICONIFY, GLFW_FALSE);
+            glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_FALSE);
 
-        glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_FALSE);
-        glfwSetWindowMonitor(m_handle, nullptr, mx, my, vm->width, vm->height, 0);
-    }
-    else
-    {
-        glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_TRUE);
+            // A pixel taller than the screen on Windows. A frameless window
+            // exactly the size of the screen is taken by some drivers for one
+            // that has taken the screen over, and alt-tab then flashed it
+            // black and white as the two kinds were swapped back and forth.
+#ifdef _WIN32
+            const int taller = 1;
+#else
+            const int taller = 0;
+#endif
+            glfwSetWindowMonitor(m_handle, nullptr, mx, my, vm->width, vm->height + taller, 0);
+            break;
+        }
 
-        // Back to a window in the middle of that same screen.
-        int mx = 0;
-        int my = 0;
-        glfwGetMonitorPos(monitor, &mx, &my);
+        case window_mode::windowed:
+        {
+            glfwSetWindowAttrib(m_handle, GLFW_AUTO_ICONIFY, GLFW_FALSE);
+            glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_TRUE);
 
-        const GLFWvidmode* vm = glfwGetVideoMode(monitor);
-        const int w = NLE_WINDOW_DEFAULT_WIDTH;
-        const int h = NLE_WINDOW_DEFAULT_HEIGHT;
-        const int x = vm != nullptr ? mx + (vm->width - w) / 2 : mx;
-        const int y = vm != nullptr ? my + (vm->height - h) / 2 : my;
+            // In the middle of that same screen.
+            const int width = NLE_WINDOW_DEFAULT_WIDTH;
+            const int height = NLE_WINDOW_DEFAULT_HEIGHT;
+            const int x = vm != nullptr ? mx + (vm->width - width) / 2 : mx;
+            const int y = vm != nullptr ? my + (vm->height - height) / 2 : my;
 
-        glfwSetWindowMonitor(m_handle, nullptr, x, y, w, h, 0);
+            glfwSetWindowMonitor(m_handle, nullptr, x, y, width, height, 0);
+            break;
+        }
     }
 }
 
-bool window_glfw::fullscreen()
+window_mode window_glfw::mode() const
 {
-    return m_fullscreen;
+    return m_mode;
 }
 
 void window_glfw::set_cursor_visibility(bool visible)
