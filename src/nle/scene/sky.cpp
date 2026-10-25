@@ -82,9 +82,22 @@ float fog_noise(vec2 p)
                mix(fog_hash(i + vec2(0.0, 1.0)), fog_hash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
+// The same as default_frag.glsl's fog_bank_shade.
+vec3 fog_bank_shade(vec3 p, float h, float billows)
+{
+    vec3 base = u_fog_bank_color;
+    float lit = clamp(0.15 + 0.95 * h - 0.9 * (billows - 0.55), 0.0, 1.0);
+    vec3 shade = mix(base * vec3(0.36, 0.37, 0.43), base * 1.12, lit);
+
+    float tint = fog_noise((p.xz + vec2(u_time * 0.4, 0.0)) / 70.0);
+    shade *= mix(vec3(0.88, 0.93, 1.06), vec3(1.07, 1.0, 0.9), tint);
+
+    return shade;
+}
+
 // The same sum as default_frag.glsl's fog_bank_cover, along a line out to
 // the far side of the bank rather than to a surface.
-float fog_bank_cover(vec3 dir)
+vec4 fog_bank_cover(vec3 dir)
 {
     vec3 from = u_eye_position;
     float reach = 2.0 * u_fog_bank_radius + length(from.xz - u_fog_bank_centre.xz);
@@ -105,7 +118,7 @@ float fog_bank_cover(vec3 dir)
     }
     else if (from.y < floor_y || from.y > ceiling)
     {
-        return 0.0;
+        return vec4(0.0);
     }
 
     vec2 offset = from.xz - u_fog_bank_centre.xz;
@@ -119,7 +132,7 @@ float fog_bank_cover(vec3 dir)
 
         if (found < 0.0)
         {
-            return 0.0;
+            return vec4(0.0);
         }
 
         float root = sqrt(found);
@@ -128,19 +141,20 @@ float fog_bank_cover(vec3 dir)
     }
     else if (c > 0.0)
     {
-        return 0.0;
+        return vec4(0.0);
     }
 
     if (t1 <= t0)
     {
-        return 0.0;
+        return vec4(0.0);
     }
 
     const int STEPS = 10;
     float thickness = max(u_fog_bank_top - u_fog_bank_bottom, 0.001);
     float step_length = (t1 - t0) * reach / float(STEPS);
     vec2 drift = vec2(0.6, 0.25) * u_time;
-    float depth = 0.0;
+    vec3 colour = vec3(0.0);
+    float through = 1.0;
 
     for (int i = 0; i < STEPS; ++i)
     {
@@ -153,10 +167,16 @@ float fog_bank_cover(vec3 dir)
         vec2 at = p.xz + vec2(p.y * 0.8, -p.y * 0.5);
         float billows = 0.6 * fog_noise((at + drift) / 38.0) + 0.4 * fog_noise((at - drift * 1.5) / 14.0);
 
-        depth += u_fog_bank_density * body * edge * smoothstep(0.42, 0.72, billows) * 2.4 * step_length;
+        float thick = u_fog_bank_density * body * edge * smoothstep(0.42, 0.72, billows) * 2.4 * step_length;
+        float taken = 1.0 - exp(-thick);
+
+        colour += through * taken * fog_bank_shade(p, h, billows);
+        through *= 1.0 - taken;
     }
 
-    return 1.0 - exp(-depth);
+    float hidden = 1.0 - through;
+
+    return vec4(colour / max(hidden, 0.0001), hidden);
 }
 
 float hash(vec3 p)
@@ -211,7 +231,8 @@ void main()
 
     if (u_fog_bank_enabled == 1)
     {
-        colour = mix(colour, u_fog_bank_color, fog_bank_cover(dir));
+        vec4 cloud = fog_bank_cover(dir);
+        colour = mix(colour, cloud.rgb, cloud.a);
     }
 
     frag_color = vec4(colour, 1.0);
