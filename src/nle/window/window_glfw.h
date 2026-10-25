@@ -54,6 +54,15 @@ public:
     /// Whether each frame waits for the screen to be ready for it.
     void set_vsync(bool on);
 
+    /**
+     * @brief How many times a second the screen the window is on redraws.
+     *
+     * The screen it is on now -- the one under the middle of the window, or
+     * the one it fills -- not the system's first, so moving the window from
+     * a laptop's screen to a monitor beside it gives the monitor's.
+     */
+    int refresh_rate() const;
+
     ref<input_handler_glfw> input_handler();
 
     /// The underlying GLFW window. Needed by anything that talks to GLFW
@@ -68,6 +77,10 @@ private:
 
     /// Holds the frame back to its share of a second, if there is a limit.
     void pace(double frame_started);
+
+    /// The screen the window is on: the one it fills, or the one under its
+    /// middle. The system's first if it is somehow on none.
+    GLFWmonitor* current_monitor() const;
 };
 
 } // namespace nle

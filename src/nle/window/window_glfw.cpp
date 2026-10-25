@@ -157,16 +157,79 @@ void window_glfw::close()
     glfwSetWindowShouldClose(m_handle, GLFW_TRUE);
 }
 
+GLFWmonitor* window_glfw::current_monitor() const
+{
+    if(GLFWmonitor* filling = glfwGetWindowMonitor(m_handle))
+    {
+        return filling;
+    }
+
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+
+    glfwGetWindowPos(m_handle, &x, &y);
+    glfwGetWindowSize(m_handle, &w, &h);
+
+    const int middle_x = x + w / 2;
+    const int middle_y = y + h / 2;
+
+    int count = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&count);
+
+    for(int i = 0; i < count; ++i)
+    {
+        int mx = 0;
+        int my = 0;
+        glfwGetMonitorPos(monitors[i], &mx, &my);
+
+        const GLFWvidmode* mode = glfwGetVideoMode(monitors[i]);
+
+        if(mode != nullptr && middle_x >= mx && middle_x < mx + mode->width
+           && middle_y >= my && middle_y < my + mode->height)
+        {
+            return monitors[i];
+        }
+    }
+
+    return glfwGetPrimaryMonitor();
+}
+
+int window_glfw::refresh_rate() const
+{
+    GLFWmonitor* monitor = current_monitor();
+    const GLFWvidmode* mode = monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
+
+    return mode != nullptr ? mode->refreshRate : 60;
+}
+
 void window_glfw::set_fullscreen(bool fullscreen)
 {
+    // On the screen the window is on, not the system's first: a laptop with
+    // a monitor beside it went fullscreen on the laptop whichever screen the
+    // game had been moved to.
+    GLFWmonitor* monitor = current_monitor();
+
     if((m_fullscreen = fullscreen))
     {
-        const GLFWvidmode * vm = glfwGetVideoMode(glfwGetPrimaryMonitor());
-        glfwSetWindowMonitor(m_handle, glfwGetPrimaryMonitor(), 0, 0, vm->width, vm->height, vm->refreshRate);
+        const GLFWvidmode * vm = glfwGetVideoMode(monitor);
+        glfwSetWindowMonitor(m_handle, monitor, 0, 0, vm->width, vm->height, vm->refreshRate);
     }
     else
     {
-        glfwSetWindowMonitor(m_handle, nullptr, 0, 0, NLE_WINDOW_DEFAULT_WIDTH, NLE_WINDOW_DEFAULT_HEIGHT, 0);
+        // Back to a window in the middle of that same screen.
+        int mx = 0;
+        int my = 0;
+        glfwGetMonitorPos(monitor, &mx, &my);
+
+        const GLFWvidmode* vm = glfwGetVideoMode(monitor);
+        const int w = NLE_WINDOW_DEFAULT_WIDTH;
+        const int h = NLE_WINDOW_DEFAULT_HEIGHT;
+        const int x = vm != nullptr ? mx + (vm->width - w) / 2 : mx;
+        const int y = vm != nullptr ? my + (vm->height - h) / 2 : my;
+
+        glfwSetWindowMonitor(m_handle, nullptr, x, y, w, h, 0);
     }
 }
 
