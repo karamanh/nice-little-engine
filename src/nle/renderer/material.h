@@ -58,8 +58,9 @@ public:
      * @brief How far the surface rises and falls in waves, in world units.
      *
      * Nought, the default, leaves it as modelled. More makes it water: the
-     * vertices are raised and lowered by a slow swell where they stand in
-     * the world, and the surface is shaded by its own slopes -- lit where
+     * vertices are lowered and raised again by a slow swell where they stand
+     * in the world -- never above where they were modelled, so nothing dry
+     * is ever flooded -- and the surface is shaded by its own slopes -- lit where
      * they face the sun, glinting, paler towards the horizon -- even when it
      * takes no light otherwise. Only as smooth as the mesh is fine.
      */

@@ -86,9 +86,12 @@ void main() {
 
     vec4 world_position = model * vec4(position, 1.0);
 
+    // Only ever down from where the water was put, never up: ground just
+    // above a lake's level was dry when it was made and must stay dry, not
+    // be flooded in patches by every crest.
     if (u_waves > 0.0)
     {
-        world_position.y += u_waves * wave_at(world_position.xz, u_time).x;
+        world_position.y += u_waves * (wave_at(world_position.xz, u_time).x - 1.0);
     }
 
     gl_Position = u_projection * u_view * world_position;
