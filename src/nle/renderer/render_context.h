@@ -67,6 +67,9 @@ struct point_light_data
  * the ground it is a cloud: clear air underneath, something huge flying in
  * and out of it overhead.
  */
+/// How many fog banks a scene can have at once: what the shaders hold.
+constexpr int MAX_FOG_BANKS = 16;
+
 struct fog_bank_data
 {
     bool enabled = false;
@@ -106,10 +109,9 @@ struct fog_data
     /// colour fragments fade towards at far_distance.
     glm::vec3 color = glm::vec3(1.0f);
 
-    fog_bank_data bank;
-
-    /// The cloud lying in the valleys round the level, among its mountains.
-    fog_bank_data valley;
+    /// Fog and cloud lying in places: a boss's bowl, the hollows among the
+    /// hills where things live. At most MAX_FOG_BANKS; past that, ignored.
+    std::vector<fog_bank_data> banks;
 };
 
 /**

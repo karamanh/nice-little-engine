@@ -73,7 +73,8 @@ struct FogBank
     vec3 color;
 };
 
-uniform FogBank u_fog_banks[2];
+uniform FogBank u_fog_banks[16];
+uniform int u_fog_bank_count;
 
 float fog_hash(vec2 p)
 {
@@ -258,7 +259,7 @@ void main()
 
     colour += u_sun_color * (disc * 2.5 + glow + halo);
 
-    for (int i = 1; i >= 0; --i)
+    for (int i = 0; i < u_fog_bank_count; ++i)
     {
         if (u_fog_banks[i].enabled == 1)
         {
@@ -348,11 +349,13 @@ void sky::render(render_command_buffer& command_buffer, const render_context& co
 
     command_buffer.set_uniform("u_eye_position", context.eye_position);
 
-    const fog_bank_data* banks[2] = { &context.fog.bank, &context.fog.valley };
+    const int bank_count = std::min(static_cast<int>(context.fog.banks.size()), MAX_FOG_BANKS);
 
-    for(int i = 0; i < 2; ++i)
+    command_buffer.set_uniform("u_fog_bank_count", bank_count);
+
+    for(int i = 0; i < bank_count; ++i)
     {
-        const fog_bank_data& bank = *banks[i];
+        const fog_bank_data& bank = context.fog.banks[static_cast<size_t>(i)];
         const std::string at = "u_fog_banks[" + std::to_string(i) + "].";
 
         command_buffer.set_uniform(at + "enabled", bank.enabled ? 1 : 0);

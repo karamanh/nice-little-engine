@@ -182,11 +182,13 @@ void opengl_backend::upload_frame_uniforms(const ref<class shader>& shader)
     set_float("u_sky.distance_fog_far", m_context.fog.far_distance);
     set_vec3("u_sky.distance_fog_color", m_context.fog.color);
 
-    const fog_bank_data* banks[2] = { &m_context.fog.bank, &m_context.fog.valley };
+    const int bank_count = std::min(static_cast<int>(m_context.fog.banks.size()), MAX_FOG_BANKS);
 
-    for(int i = 0; i < 2; ++i)
+    set_int("u_fog_bank_count", bank_count);
+
+    for(int i = 0; i < bank_count; ++i)
     {
-        const fog_bank_data& bank = *banks[i];
+        const fog_bank_data& bank = m_context.fog.banks[static_cast<size_t>(i)];
         const std::string at = "u_fog_banks[" + std::to_string(i) + "].";
 
         set_int(at + "enabled", bank.enabled ? 1 : 0);

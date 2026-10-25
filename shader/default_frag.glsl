@@ -234,8 +234,9 @@ uniform int u_point_light_count;
 
 uniform Material u_material;
 uniform Sky u_sky;
-// The level's own bank, and the cloud lying in the valleys round it.
-uniform FogBank u_fog_banks[2];
+// Every bank in the level, as many as there are: see nle::MAX_FOG_BANKS.
+uniform FogBank u_fog_banks[16];
+uniform int u_fog_bank_count;
 uniform float u_waves;
 uniform vec3 u_eye_position;
 
@@ -647,8 +648,7 @@ void main() {
     // After the haze of distance, not before: a cloud in the bowl is
     // nearer than the hills far off behind it, and hides them as it hides
     // the sky.
-    // The valleys' first, which lie further off, then the level's own.
-    for (int i = 1; i >= 0; --i)
+    for (int i = 0; i < u_fog_bank_count; ++i)
     {
         if (u_fog_banks[i].enabled == 1)
         {
