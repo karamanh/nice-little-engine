@@ -99,7 +99,19 @@ enum class particle_style
      * opens at the top. Radius is the funnel's at its widest, and about how
      * tall it stands; speed is how fast it turns, in radians a second.
      */
-    vortex
+    vortex,
+
+    /**
+     * @brief Born all round a short cylinder and turning slowly about it:
+     *        mist hanging about something. Frost on a staff.
+     *
+     * The cylinder stands along the emitter's own up, so an emitter turned
+     * to lie along a staff wraps the staff. Each fades in and out rather
+     * than starting bright, so nothing reads as going off. Radius is the
+     * cylinder's, and its height about twice that; speed is how fast it
+     * turns, in radians a second.
+     */
+    mist
 };
 
 /**
@@ -157,6 +169,16 @@ public:
     void set_intensity(float intensity);
     float intensity() const;
 
+    /**
+     * @brief Fewer of them the further off they are, and none past a point.
+     *
+     * For something small that many people may be carrying at once -- the
+     * frost on a staff -- where a crowd would otherwise be a crowd's worth of
+     * particles however small it is on the screen. Off by default: a spell's
+     * effect is the whole point of looking across a field.
+     */
+    void set_thin_with_distance(bool thin);
+
     void render(render_command_buffer& command_buffer, const render_context& context) override;
 
     /// Light casts no shadow -- and drawn into the shadow pass, a fire aged
@@ -188,6 +210,7 @@ private:
     /// point, which is the ordinary case.
     glm::vec3 m_span = glm::vec3(0.0f);
     float m_intensity = 1.0f;
+    bool m_thin_with_distance = false;
 
     /// Counts up, and is what the whole simulation is a function of.
     float m_clock = 0.0f;

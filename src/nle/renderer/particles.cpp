@@ -5,6 +5,8 @@
 
 #include <GL/glew.h>
 
+#include <algorithm>
+
 #include <glm/gtc/type_ptr.hpp>
 
 namespace nle
@@ -206,6 +208,20 @@ void main()
 
         size *= (0.5 + r.z * 0.6) * (1.0 - age * 0.45);
     }
+    else if(u_style == 9)
+    {
+        // Mist: born anywhere round a short cylinder about the emitter's up,
+        // turning slowly round it and drifting up a little, swelling as it
+        // goes -- a cold breath hanging about the thing, not a stream.
+        float turn = angle + seconds * u_speed;
+        float ring = u_radius * (0.8 + r.y * 0.4);
+
+        local = vec3(cos(turn) * ring,
+                     (r.z - 0.5) * u_radius * 2.2 + seconds * u_radius * 0.12,
+                     sin(turn) * ring);
+
+        size *= (0.7 + r.z * 0.6) * (0.8 + age * 0.5);
+    }
     else
     {
         // Spark: straight out, fast, gone. Born inside the radius for the
@@ -289,6 +305,12 @@ void main()
     // colour, because these are drawn additively and a colour fading to black
     // is already invisible.
     float life = 1.0 - v_age;
+
+    // Mist comes and goes softly at both ends: nothing in it starts bright.
+    if(u_style == 9)
+    {
+        life = sin(v_age * 3.14159265);
+    }
 
     vec3 colour = mix(u_born, u_dying, v_age);
 
@@ -426,6 +448,11 @@ float particle_emitter::intensity() const
     return m_intensity;
 }
 
+void particle_emitter::set_thin_with_distance(bool thin)
+{
+    m_thin_with_distance = thin;
+}
+
 void particle_emitter::render(render_command_buffer& command_buffer,
                               const render_context& context)
 {
@@ -437,6 +464,23 @@ void particle_emitter::render(render_command_buffer& command_buffer,
     ensure_resources();
 
     m_clock += context.delta_time;
+
+    // All of them close by, thinning out from fifteen metres to a fifth of
+    // them at sixty, and none past that: a crowd far off costs nothing.
+    size_t drawn = m_count;
+
+    if(m_thin_with_distance)
+    {
+        const float away = glm::length(glm::vec3(transform_matrix()[3]) - context.eye_position);
+
+        if(away > 60.0f)
+        {
+            return;
+        }
+
+        const float share = 1.0f - 0.8f * std::clamp((away - 15.0f) / 45.0f, 0.0f, 1.0f);
+        drawn = std::max<size_t>(1, static_cast<size_t>(static_cast<float>(m_count) * share));
+    }
 
     command_buffer.use_shader(g_shader);
 
@@ -450,7 +494,7 @@ void particle_emitter::render(render_command_buffer& command_buffer,
     command_buffer.set_uniform("u_size", m_size);
     command_buffer.set_uniform("u_radius", m_radius);
     command_buffer.set_uniform("u_span", m_span);
-    command_buffer.set_uniform("u_count", static_cast<int>(m_count));
+    command_buffer.set_uniform("u_count", static_cast<int>(drawn));
     command_buffer.set_uniform("u_style", static_cast<int>(m_style));
 
     command_buffer.set_uniform("u_born", m_born);
@@ -464,7 +508,7 @@ void particle_emitter::render(render_command_buffer& command_buffer,
     command_buffer.set_blending(blend_mode::additive);
     command_buffer.set_depth_mask(false);
 
-    command_buffer.draw_elements_instanced(GL_TRIANGLES, g_vao, g_ebo, 6, m_count);
+    command_buffer.draw_elements_instanced(GL_TRIANGLES, g_vao, g_ebo, 6, drawn);
 
     // Put back, or everything drawn after this is a glow too.
     command_buffer.set_depth_mask(true);
