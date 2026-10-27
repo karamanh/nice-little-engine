@@ -132,7 +132,9 @@ public:
      * @param tint how far the surface itself takes on @p colour as well,
      *             nought to one, at full @p amount: a frost blade blue
      *             through, rather than steel with a blue edge. Nought keeps
-     *             the surface its own colour.
+     *             the surface its own colour. Past one it goes all the way
+     *             through at less than full @p amount: something carved, in
+     *             one colour and hardly polished at all.
      *
      * Handed down to the pieces of something made of several, so setting it
      * on a model sets it on all of it.

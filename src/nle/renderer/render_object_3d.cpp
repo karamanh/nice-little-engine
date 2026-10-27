@@ -99,7 +99,7 @@ namespace nle
     {
         m_sheen = amount > 0.0f ? amount : 0.0f;
         m_sheen_colour = colour;
-        m_sheen_tint = tint < 0.0f ? 0.0f : (tint > 1.0f ? 1.0f : tint);
+        m_sheen_tint = tint < 0.0f ? 0.0f : tint;
     }
 
     float render_object_3d::sheen_tint() const
