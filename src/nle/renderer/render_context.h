@@ -151,6 +151,10 @@ struct render_context
     /// shadows switched off kept it quiet.
     int shadow_texture_unit = 12;
 
+    /// Which unit the fog's noise is on: next to the depth map's, as clear
+    /// of a material's own.
+    int fog_noise_texture_unit = 13;
+
     /// How soft the edge is, in texels of the depth map.
     float shadow_softness = 1.0f;
     std::vector<point_light_data> point_lights;

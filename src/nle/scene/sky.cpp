@@ -28,9 +28,13 @@ void main()
 {
     v_direction = position;
 
-    // Drawn first and writing no depth, so everything drawn after it is in
-    // front of it wherever it happens to sit.
-    gl_Position = u_projection * u_view_rotation * vec4(position, 1.0);
+    // At the very back: drawn after everything solid, with its depth the far
+    // plane's, so it fills only what nothing else has -- and the fog banks
+    // seen against it are worked out only where it shows. Drawn first, every
+    // pixel paid for them, ground and all, which standing in a bank was the
+    // whole screen.
+    vec4 at = u_projection * u_view_rotation * vec4(position, 1.0);
+    gl_Position = at.xyww;
 }
 )";
 
@@ -76,33 +80,31 @@ struct FogBank
 uniform FogBank u_fog_banks[16];
 uniform int u_fog_bank_count;
 
-float fog_hash(vec2 p)
-{
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
+// Value noise, read from a picture of it (renderer_3d::make_fog_noise) that
+// repeats every 256 cells: one fetch, where working it out from a hash was
+// four -- and a look through a fog bank asks for it two dozen times.
+uniform sampler2D u_fog_noise;
 
 float fog_noise(vec2 p)
 {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-
-    return mix(mix(fog_hash(i), fog_hash(i + vec2(1.0, 0.0)), f.x),
-               mix(fog_hash(i + vec2(0.0, 1.0)), fog_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+    return texture(u_fog_noise, p / 256.0).r;
 }
 
 // The same as default_frag.glsl's fog_bank_shade.
 vec3 fog_bank_shade(vec3 base, vec3 p, float h, float billows)
 {
     float lit = clamp(0.15 + 0.95 * h - 0.9 * (billows - 0.55), 0.0, 1.0);
-    vec3 shade = mix(base * vec3(0.36, 0.37, 0.43), base * 1.12, lit);
 
+    return mix(base * vec3(0.36, 0.37, 0.43), base * 1.12, lit);
+}
+
+// The slow patches a little bluer or browner, seventy metres across: the
+// same anywhere along one look through a bank, so worked out once for it
+// rather than at every step.
+vec3 fog_bank_tint(vec3 p)
+{
     float tint = fog_noise((p.xz + vec2(u_time * 0.4, 0.0)) / 70.0);
-    shade *= mix(vec3(0.88, 0.93, 1.06), vec3(1.07, 1.0, 0.9), tint);
-
-    return shade;
+    return mix(vec3(0.88, 0.93, 1.06), vec3(1.07, 1.0, 0.9), tint);
 }
 
 // The same sum as default_frag.glsl's fog_bank_cover, along a line out to
@@ -170,16 +172,29 @@ vec4 fog_bank_cover(FogBank bank, vec3 dir)
         return vec4(0.0);
     }
 
-    const int STEPS = 10;
+    // As many steps as the length of the look through it needs: about one
+    // every sixth of a billow, so a billow is never stepped over, and no more
+    // than ten. Standing in a bank, most of the screen is ground or grass a
+    // few metres off, which three steps cover as well as ten did; it was all
+    // of those paying for ten that made walking into one slow.
+    const int MOST_STEPS = 10;
+    float path = (t1 - t0) * length(ray);
+    int steps = int(clamp(ceil(path / max(bank.billow * 0.16, 0.05)), 3.0, float(MOST_STEPS)));
     float thickness = max(bank.top - bank.bottom, 0.001);
-    float step_length = (t1 - t0) * length(ray) / float(STEPS);
+    float step_length = path / float(steps);
     vec2 drift = vec2(0.6, 0.25) * u_time * (bank.billow / 38.0);
     vec3 colour = vec3(0.0);
     float through = 1.0;
 
-    for (int i = 0; i < STEPS; ++i)
+    for (int i = 0; i < MOST_STEPS; ++i)
     {
-        vec3 p = from + ray * mix(t0, t1, (float(i) + 0.5) / float(STEPS));
+        // Done: the steps are spent, or nothing more behind can show.
+        if (i >= steps || through < 0.015)
+        {
+            break;
+        }
+
+        vec3 p = from + ray * mix(t0, t1, (float(i) + 0.5) / float(steps));
 
         // Up from nothing at the bottom, full through the middle, and away
         // to nothing at the top -- softer above than below, as cloud is.
@@ -205,6 +220,8 @@ vec4 fog_bank_cover(FogBank bank, vec3 dir)
     }
 
     float hidden = 1.0 - through;
+
+    colour *= fog_bank_tint(from + ray * mix(t0, t1, 0.5));
 
     return vec4(colour / max(hidden, 0.0001), hidden);
 }
@@ -352,6 +369,7 @@ void sky::render(render_command_buffer& command_buffer, const render_context& co
     const int bank_count = std::min(static_cast<int>(context.fog.banks.size()), MAX_FOG_BANKS);
 
     command_buffer.set_uniform("u_fog_bank_count", bank_count);
+    command_buffer.set_uniform("u_fog_noise", context.fog_noise_texture_unit);
 
     for(int i = 0; i < bank_count; ++i)
     {

@@ -2,6 +2,9 @@
 #include "render_texture.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -24,6 +27,80 @@ namespace nle
 
     renderer_3d::~renderer_3d()
     {
+        if(m_fog_noise != 0)
+        {
+            glDeleteTextures(1, &m_fog_noise);
+        }
+    }
+
+    namespace
+    {
+        float fract(float x)
+        {
+            return x - std::floor(x);
+        }
+
+        /// The shaders' fog_hash, to the letter.
+        float fog_hash(float x, float y)
+        {
+            float a = fract(x * 0.1031f);
+            float b = fract(y * 0.1031f);
+            float c = fract(x * 0.1031f);
+
+            const float d = a * b + b * c + c * a + 33.33f * (a + b + c);
+            // dot(p3, p3.yzx + 33.33) with p3 = (a, b, c)
+            a += d;
+            b += d;
+            c += d;
+
+            return fract((a + b) * c);
+        }
+    }
+
+    void renderer_3d::make_fog_noise()
+    {
+        constexpr int CELLS = 256;
+        constexpr int PER_CELL = 8;
+        constexpr int SIDE = CELLS * PER_CELL;
+
+        std::vector<uint8_t> pixels(static_cast<size_t>(SIDE) * SIDE);
+
+        for(int y = 0; y < SIDE; ++y)
+        {
+            const int cy = y / PER_CELL;
+            float fy = (static_cast<float>(y % PER_CELL) + 0.5f) / PER_CELL;
+            fy = fy * fy * (3.0f - 2.0f * fy);
+
+            for(int x = 0; x < SIDE; ++x)
+            {
+                const int cx = x / PER_CELL;
+                float fx = (static_cast<float>(x % PER_CELL) + 0.5f) / PER_CELL;
+                fx = fx * fx * (3.0f - 2.0f * fx);
+
+                // Wrapping, so the picture tiles without a seam.
+                const float x0 = static_cast<float>(cx), x1 = static_cast<float>((cx + 1) % CELLS);
+                const float y0 = static_cast<float>(cy), y1 = static_cast<float>((cy + 1) % CELLS);
+
+                const float low = fog_hash(x0, y0) + (fog_hash(x1, y0) - fog_hash(x0, y0)) * fx;
+                const float high = fog_hash(x0, y1) + (fog_hash(x1, y1) - fog_hash(x0, y1)) * fx;
+                const float value = low + (high - low) * fy;
+
+                pixels[static_cast<size_t>(y) * SIDE + x] =
+                    static_cast<uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+            }
+        }
+
+        glGenTextures(1, &m_fog_noise);
+        glBindTexture(GL_TEXTURE_2D, m_fog_noise);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, SIDE, SIDE, 0, GL_RED, GL_UNSIGNED_BYTE, pixels.data());
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
     void renderer_3d::set_current_scene(ref<scene_3d> scene)
@@ -59,6 +136,11 @@ namespace nle
     const opengl_backend::frame_statistics& renderer_3d::statistics() const
     {
         return m_opengl_backend.statistics();
+    }
+
+    float renderer_3d::gpu_milliseconds() const
+    {
+        return m_gpu_ms;
     }
 
     float renderer_3d::delta_time() const
@@ -303,14 +385,17 @@ namespace nle
             m_shadows.bind_for_reading(context.shadow_texture_unit);
         }
 
+        if(m_fog_noise == 0)
+        {
+            make_fog_noise();
+        }
+
+        glActiveTexture(GL_TEXTURE0 + context.fog_noise_texture_unit);
+        glBindTexture(GL_TEXTURE_2D, m_fog_noise);
+        glActiveTexture(GL_TEXTURE0);
+
         m_command_buffer.clear();
         m_opengl_backend.begin_frame(context);
-
-        if(scene->sky())
-        {
-            scene->sky()->set_position(context.eye_position);
-            scene->sky()->render(m_command_buffer, context);
-        }
 
         // Solid things first, then the see-through ones.
         //
@@ -338,6 +423,14 @@ namespace nle
             }
 
             ro->render(m_command_buffer, context);
+        }
+
+        // The sky behind it all, where nothing solid stands; before the
+        // see-through things, which write no depth and would be painted over.
+        if(scene->sky())
+        {
+            scene->sky()->set_position(context.eye_position);
+            scene->sky()->render(m_command_buffer, context);
         }
 
         // Far to near among themselves, so two that overlap blend in the
@@ -568,6 +661,14 @@ namespace nle
         const int width = m_render_target->width();
         const int height = m_render_target->height();
 
+        if(m_gpu_queries[0] == 0)
+        {
+            glGenQueries(2, m_gpu_queries);
+        }
+
+        const unsigned int timing = m_gpu_queries[m_gpu_frames % 2];
+        glBeginQuery(GL_TIME_ELAPSED, timing);
+
         // The scene goes into bloom's own target when it is on, and straight
         // to the window when it is not. Either way it is cleared once, here.
         if(!m_bloom.begin(width, height))
@@ -585,6 +686,25 @@ namespace nle
         // Nothing if bloom did not begin, so the interface drawn after this
         // lands on the window either way.
         m_bloom.end();
+
+        glEndQuery(GL_TIME_ELAPSED);
+
+        // Last frame's, which has had a frame to finish.
+        if(m_gpu_frames > 0)
+        {
+            const unsigned int last = m_gpu_queries[(m_gpu_frames + 1) % 2];
+            GLuint64 ready = 0;
+            glGetQueryObjectui64v(last, GL_QUERY_RESULT_AVAILABLE, &ready);
+
+            if(ready)
+            {
+                GLuint64 nanoseconds = 0;
+                glGetQueryObjectui64v(last, GL_QUERY_RESULT, &nanoseconds);
+                m_gpu_ms = static_cast<float>(nanoseconds) / 1.0e6f;
+            }
+        }
+
+        ++m_gpu_frames;
 
         // glfw specific functions like glfwSwapBuffers are called
         // from window_glfw::display().

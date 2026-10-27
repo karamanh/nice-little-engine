@@ -185,6 +185,7 @@ void opengl_backend::upload_frame_uniforms(const ref<class shader>& shader)
     const int bank_count = std::min(static_cast<int>(m_context.fog.banks.size()), MAX_FOG_BANKS);
 
     set_int("u_fog_bank_count", bank_count);
+    set_int("u_fog_noise", m_context.fog_noise_texture_unit);
 
     for(int i = 0; i < bank_count; ++i)
     {

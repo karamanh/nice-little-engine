@@ -68,6 +68,13 @@ public:
     /// Seconds spent on the previous frame.
     float delta_time() const;
 
+    /**
+     * @brief How long the GPU spent drawing the 3D scene, in milliseconds:
+     *        a frame or two ago, since asking for this frame's would wait for
+     *        it. What a frame rate held to the screen's cannot show.
+     */
+    float gpu_milliseconds() const;
+
     void set_clear_color(const glm::vec3& color);
     glm::vec3 clear_color() const;
 
@@ -137,6 +144,24 @@ private:
 
     clock m_clock;
     int64_t m_last_frame_us = 0;
+
+    /// Two timer queries, taken in turns, so the one read is always a frame
+    /// old and finished.
+    unsigned int m_gpu_queries[2] = { 0, 0 };
+
+    /**
+     * @brief The fog's noise, worked out once into a picture rather than in
+     *        every fragment, every step of the way through a fog bank.
+     *
+     * The same value noise the shaders made of a hash, eight texels to a
+     * cell so the filtering follows its smooth curve, repeating every 256
+     * cells -- seven kilometres of fog bank -- so nobody sees it repeat.
+     * Reading it is one fetch where working it out was four hashes.
+     */
+    unsigned int m_fog_noise = 0;
+    void make_fog_noise();
+    uint64_t m_gpu_frames = 0;
+    float m_gpu_ms = 0.0f;
     float m_delta_time = 0.0f;
     float m_time = 0.0f;
 
