@@ -111,7 +111,42 @@ enum class particle_style
      * cylinder's, and its height about twice that; speed is how fast it
      * turns, in radians a second.
      */
-    mist
+    mist,
+
+    /**
+     * @brief In from all round to the middle, turning as it comes, and
+     *        brightest as it arrives: power being gathered. A cast.
+     *
+     * The other way round from everything else here: born on a shell at the
+     * radius, mostly above the middle rather than below it, and drawn in to
+     * the emitter by the end of its life. Speed is how far each turns on
+     * the way in, in radians.
+     */
+    converge,
+
+    /**
+     * @brief Wound round the emitter's up and streaming back down it: two
+     *        strands turning about something in flight.
+     *
+     * Born at the emitter on a ring of the radius, each particle slides back
+     * along the emitter's down as it ages -- seven radii by the end of its
+     * life -- turning as it goes, every other one half a turn round from the
+     * last, so it is a double helix rather than a single thread. Lay the
+     * emitter's up along the way something flies and the coil trails behind
+     * it. Speed is how fast it turns, in radians a second.
+     */
+    coil,
+
+    /**
+     * @brief Out along the ground from the middle to the radius: a wave.
+     *
+     * Each particle is carried flat from the emitter to the rim by the end
+     * of its life, flickering up a little as it goes and holding its light
+     * until nearly there -- so, born all at once, a ring of them is a front
+     * sweeping across the circle, a wall of fire rolling out from where a
+     * meteor came down. Speed is how high the front licks, in units.
+     */
+    wave
 };
 
 /**
@@ -189,6 +224,19 @@ public:
      */
     void set_dark(bool dark);
 
+    /**
+     * @brief Each particle lives once, and the emitter is spent after that.
+     *
+     * The ordinary emitter is a loop that has always been running, which is
+     * right for a flame on a staff and wrong for anything that happens: a
+     * burst made of one is a sprinkler, spraying for as long as it is kept
+     * alive. Once, every particle is born within @p births_over seconds of
+     * the emitter's first frame, lives its one life and is not born again --
+     * an impact rather than a fountain. Sparks and swirls slow as they go,
+     * as things flung out do.
+     */
+    void set_once(bool once, float births_over = 0.0f);
+
     void render(render_command_buffer& command_buffer, const render_context& context) override;
 
     /// Light casts no shadow -- and drawn into the shadow pass, a fire aged
@@ -222,6 +270,9 @@ private:
     float m_intensity = 1.0f;
     bool m_thin_with_distance = false;
     bool m_dark = false;
+
+    bool m_once = false;
+    float m_births_over = 0.0f;
 
     /// Counts up, and is what the whole simulation is a function of.
     float m_clock = 0.0f;

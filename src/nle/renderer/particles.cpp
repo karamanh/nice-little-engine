@@ -45,6 +45,8 @@ uniform float u_radius;
 uniform vec3  u_span;
 uniform int   u_count;
 uniform int   u_style;
+uniform int   u_once;
+uniform float u_births;
 
 out float v_age;
 out vec2  v_corner;
@@ -67,7 +69,29 @@ void main()
     float phase = float(gl_InstanceID) / float(max(u_count, 1));
     float age = fract(u_time / u_lifetime + phase);
 
+    // Once: born within the first u_births seconds, alive for one life,
+    // and then nowhere -- pushed outside the clip volume, which is cheaper
+    // than anything the fragment stage could do with it.
+    if(u_once == 1)
+    {
+        age = (u_time - phase * u_births) / u_lifetime;
+
+        if(age < 0.0 || age >= 1.0)
+        {
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            v_age = 1.0;
+            v_corner = vec2(1.0);
+            v_tone = 0.0;
+            return;
+        }
+    }
+
     float seconds = age * u_lifetime;
+
+    // How far something flung out has got: quick at first and slowing, the
+    // way a thing thrown through air goes. Only for one that lives once; a
+    // loop has no first instant to be quick in.
+    float eased = 1.0 - (1.0 - age) * (1.0 - age);
 
     // A direction that does not change for the life of this particle.
     float angle = r.x * 6.2831853;
@@ -126,7 +150,7 @@ void main()
         // Swirl: out from the middle and turning, arriving at the rim as it
         // dies. An explosion is a front that travels, so every particle
         // starts at the centre rather than somewhere inside the circle.
-        float out_by = u_radius * age;
+        float out_by = u_radius * (u_once == 1 ? eased : age);
         float turn = age * 2.4 + r.z * 6.283;
 
         vec2 spun = vec2(around.x * cos(turn) - around.y * sin(turn),
@@ -223,12 +247,53 @@ void main()
 
         size *= (0.7 + r.z * 0.6) * (0.8 + age * 0.5);
     }
+    else if(u_style == 10)
+    {
+        // Converge: from a shell at the radius in to the middle, turning on
+        // the way. Eased, so each one drifts at first and is pulled hard at
+        // the end, which is what makes it read as drawn in rather than
+        // merely moving.
+        vec3 from = normalize(vec3(around.x, (r.y - 0.25) * 1.5, around.y));
+        float left = 1.0 - age * age;
+        float turn = age * u_speed * (r.z > 0.5 ? 1.0 : -1.0);
+
+        vec2 spun = vec2(from.x * cos(turn) - from.z * sin(turn),
+                         from.x * sin(turn) + from.z * cos(turn));
+
+        local = vec3(spun.x, from.y, spun.y) * u_radius * (0.75 + r.z * 0.25) * left;
+
+        size *= (0.45 + r.z * 0.5) * (0.6 + age * 0.6);
+    }
+    else if(u_style == 11)
+    {
+        // Coil: round the up axis on a ring, sliding back down it with age,
+        // every other one half a turn on from the last.
+        float strand = mod(index, 2.0) * 3.14159265;
+        float turn = u_time * u_speed + strand + (r.x - 0.5) * 0.5 - age * 5.0;
+        float ring = u_radius * (0.85 + 0.3 * r.y) * (1.0 - 0.35 * age);
+
+        local = vec3(cos(turn) * ring, -age * u_radius * 7.0, sin(turn) * ring);
+
+        size *= (0.6 + r.z * 0.5) * (1.0 - age * 0.55);
+    }
+    else if(u_style == 12)
+    {
+        // Wave: flat out to the rim, a little ragged at the front, licking
+        // up and down as it goes.
+        float out_by = u_radius * (u_once == 1 ? eased : age) * (0.9 + 0.1 * r.y);
+        float lick = u_speed * r.z * (0.5 + 0.5 * sin(u_time * 9.0 + index * 1.7)) * sin(age * 3.14159265);
+
+        local = vec3(around.x * out_by, lick, around.y * out_by);
+
+        size *= (0.55 + r.z * 0.6) * (0.7 + age * 0.6);
+    }
     else
     {
         // Spark: straight out, fast, gone. Born inside the radius for the
         // same reason a cloud is -- a ring of sparks around an empty middle
         // is not a field of lightning.
-        float reach = seconds * u_speed * 2.2;
+        float reach = u_once == 1 ? eased * u_lifetime * u_speed * 1.6
+                                  : seconds * u_speed * 2.2;
         float up = (r.y - 0.4) * 1.6;
 
         local = normalize(vec3(around.x, up, around.y))
@@ -314,6 +379,18 @@ void main()
     if(u_style == 9)
     {
         life = sin(v_age * 3.14159265);
+    }
+
+    // Gathering in: faint far out, brightest arriving, gone into the middle.
+    if(u_style == 10)
+    {
+        life = smoothstep(0.0, 0.45, v_age) * (1.0 - smoothstep(0.9, 1.0, v_age));
+    }
+
+    // A wave holds its light until it is nearly at the rim.
+    if(u_style == 12)
+    {
+        life = 1.0 - smoothstep(0.65, 1.0, v_age);
     }
 
     vec3 colour = mix(u_born, u_dying, v_age);
@@ -479,6 +556,12 @@ void particle_emitter::set_dark(bool dark)
     m_dark = dark;
 }
 
+void particle_emitter::set_once(bool once, float births_over)
+{
+    m_once = once;
+    m_births_over = std::max(births_over, 0.0f);
+}
+
 void particle_emitter::render(render_command_buffer& command_buffer,
                               const render_context& context)
 {
@@ -522,6 +605,8 @@ void particle_emitter::render(render_command_buffer& command_buffer,
     command_buffer.set_uniform("u_span", m_span);
     command_buffer.set_uniform("u_count", static_cast<int>(drawn));
     command_buffer.set_uniform("u_style", static_cast<int>(m_style));
+    command_buffer.set_uniform("u_once", m_once ? 1 : 0);
+    command_buffer.set_uniform("u_births", m_births_over);
 
     command_buffer.set_uniform("u_born", m_born);
     command_buffer.set_uniform("u_dying", m_dying);
