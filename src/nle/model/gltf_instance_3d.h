@@ -102,7 +102,23 @@ public:
      */
     bool see_through() override;
 
+    /**
+     * @brief Its model, when it is drawn exactly as the model is.
+     *
+     * Not when anything about this one copy changes how it looks: a material
+     * of its own, a sheen, fog it shows through, a part hidden, a skin -- the
+     * pose of a skin is its own -- or a mode other than filled.
+     */
+    const void* copies_key() override;
+
+    /// Each part once for all of @p copies, every copy where it stands.
+    void render_copies(render_command_buffer& command_buffer, const render_context& context,
+                       const std::vector<render_object_3d*>& copies) override;
+
 private:
+    /// Moves its pose on, once a frame however often it is drawn.
+    void advance(const render_context& context);
+
     ref<model_gltf> m_model;
     ref<class animator> m_animator;
     bool m_auto_advance = true;

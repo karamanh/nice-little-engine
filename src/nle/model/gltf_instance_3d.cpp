@@ -132,11 +132,7 @@ void gltf_instance_3d::render(render_command_buffer& command_buffer, const rende
         return;
     }
 
-    if(m_auto_advance && context.time != m_advanced_at)
-    {
-        m_animator->update(context.delta_time);
-        m_advanced_at = context.time;
-    }
+    advance(context);
 
     command_buffer.set_polygon_mode(GL_FRONT_AND_BACK, static_cast<GLenum>(render_mode()));
     command_buffer.use_shader(this->shader());
@@ -244,6 +240,81 @@ void gltf_instance_3d::render(render_command_buffer& command_buffer, const rende
             command_buffer.set_blending(blend_mode::none);
         }
     }
+}
+
+void gltf_instance_3d::advance(const render_context& context)
+{
+    if(m_auto_advance && context.time != m_advanced_at)
+    {
+        m_animator->update(context.delta_time);
+        m_advanced_at = context.time;
+    }
+}
+
+const void* gltf_instance_3d::copies_key()
+{
+    if(!m_model || !m_animator || this->material_override() || this->sheen() > 0.0f
+       || this->fog_cap() < 1.0f || !m_hidden_nodes.empty() || render_mode() != nle::render_mode::fill
+       || this->primitive_type() != nle::primitive_type::triangles)
+    {
+        return nullptr;
+    }
+
+    for(const auto& primitive : m_model->primitives())
+    {
+        if(primitive.skin >= 0)
+        {
+            return nullptr;
+        }
+    }
+
+    return m_model.get();
+}
+
+void gltf_instance_3d::render_copies(render_command_buffer& command_buffer, const render_context& context,
+                                     const std::vector<render_object_3d*>& copies)
+{
+    // The renderer only hands over copies of this model; each moves its own
+    // pose on, which is how a windmill's sails turn while it is one of many.
+    std::vector<gltf_instance_3d*> placed;
+    placed.reserve(copies.size());
+
+    for(auto* one : copies)
+    {
+        auto* copy = static_cast<gltf_instance_3d*>(one);
+        copy->advance(context);
+        placed.push_back(copy);
+    }
+
+    command_buffer.set_polygon_mode(GL_FRONT_AND_BACK, static_cast<GLenum>(nle::render_mode::fill));
+    command_buffer.use_shader(this->shader());
+    command_buffer.set_uniform("u_skinning_enabled", 0);
+    command_buffer.set_uniform("u_instanced", 1);
+
+    for(const auto& primitive : m_model->primitives())
+    {
+        if(!primitive.mesh)
+        {
+            continue;
+        }
+
+        std::vector<glm::mat4> transforms;
+        transforms.reserve(placed.size());
+
+        for(auto* copy : placed)
+        {
+            transforms.push_back(copy->transform_matrix() * copy->m_animator->node_world_matrix(primitive.node));
+        }
+
+        record_surface_uniforms(command_buffer, context, primitive.mesh->texture(), primitive.mesh->material());
+
+        command_buffer.draw_copies(static_cast<GLenum>(nle::primitive_type::triangles), primitive.mesh->vao(),
+                                   primitive.mesh->ebo(), primitive.mesh->indices().size(),
+                                   std::move(transforms));
+    }
+
+    // Back as every other draw expects it.
+    command_buffer.set_uniform("u_instanced", 0);
 }
 
 bool gltf_instance_3d::see_through()

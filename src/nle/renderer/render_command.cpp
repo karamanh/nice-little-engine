@@ -117,6 +117,20 @@ void render_command_buffer::draw_elements_instanced(unsigned int primitive_type,
     m_commands.push_back(cmd);
 }
 
+void render_command_buffer::draw_copies(unsigned int primitive_type, unsigned int vao, unsigned int ebo,
+                                        size_t count, std::vector<glm::mat4> transforms)
+{
+    if(transforms.empty())
+    {
+        return;
+    }
+
+    render_command cmd;
+    cmd.type = command_type::draw_copies;
+    cmd.data = draw_copies_data{ primitive_type, vao, ebo, count, std::move(transforms) };
+    m_commands.push_back(std::move(cmd));
+}
+
 void render_command_buffer::set_depth_mask(bool mask)
 {
     render_command cmd;

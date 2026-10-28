@@ -29,6 +29,11 @@ layout (location = 3) in vec2 texture;
 layout (location = 4) in vec4 joints;
 layout (location = 5) in vec4 weights;
 
+// Drawn as copies (render_command_buffer::draw_copies), each copy's model
+// matrix comes in here, one per copy, instead of from u_model.
+uniform int u_instanced;
+layout (location = 6) in mat4 instance_model;
+
 int joint_index(float raw)
 {
     // Clamped so malformed weights can never index outside the array.
@@ -77,7 +82,7 @@ vec3 wave_at(vec2 at, float time)
 }
 
 void main() {
-    mat4 model = u_model;
+    mat4 model = u_instanced == 1 ? instance_model : u_model;
 
     if (u_skinning_enabled == 1)
     {

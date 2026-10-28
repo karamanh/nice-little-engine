@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -343,6 +344,8 @@ namespace nle
                 // puts a shadow in front of you.
                 const float reach = m_shadows.distance();
 
+                std::vector<ref<render_object_3d>> casting_now;
+
                 for(auto ro : scene->render_objects())
                 {
                     if(!ro->visible() || !ro->casts_shadow())
@@ -355,8 +358,10 @@ namespace nle
                         continue;
                     }
 
-                    ro->render(m_shadow_commands, from_the_sun);
+                    casting_now.push_back(ro);
                 }
+
+                render_together(m_shadow_commands, from_the_sun, casting_now);
 
                 // The light's own view and projection, which are uploaded
                 // when a shader is bound and so have to be in place before
@@ -408,6 +413,7 @@ namespace nle
         // they went missing on arriving somewhere rather than at any
         // particular place.
         std::vector<ref<render_object_3d>> see_through;
+        std::vector<ref<render_object_3d>> solid;
 
         for(auto ro : scene->render_objects())
         {
@@ -422,8 +428,10 @@ namespace nle
                 continue;
             }
 
-            ro->render(m_command_buffer, context);
+            solid.push_back(ro);
         }
+
+        render_together(m_command_buffer, context, solid);
 
         // The sky behind it all, where nothing solid stands; before the
         // see-through things, which write no depth and would be painted over.
@@ -451,6 +459,59 @@ namespace nle
 
         draw_glow_shells(scene, context);
         draw_outlines(scene, context);
+    }
+
+    void renderer_3d::render_together(render_command_buffer& command_buffer, const render_context& context,
+                                      const std::vector<ref<render_object_3d>>& objects)
+    {
+        // In the order first seen, so a frame records the same way each time.
+        struct lot
+        {
+            const void* key;
+            const class shader* shader;
+            std::vector<render_object_3d*> copies;
+        };
+
+        std::vector<lot> lots;
+        std::unordered_map<const void*, std::vector<size_t>> lots_by_key;
+
+        for(const auto& ro : objects)
+        {
+            const void* key = ro->copies_key();
+
+            if(!key)
+            {
+                ro->render(command_buffer, context);
+                continue;
+            }
+
+            const class shader* used = ro->shader().get();
+            auto& candidates = lots_by_key[key];
+            auto found = std::find_if(candidates.begin(), candidates.end(),
+                                      [&](size_t at) { return lots[at].shader == used; });
+
+            if(found == candidates.end())
+            {
+                candidates.push_back(lots.size());
+                lots.push_back({ key, used, { ro.get() } });
+            }
+            else
+            {
+                lots[*found].copies.push_back(ro.get());
+            }
+        }
+
+        for(auto& one : lots)
+        {
+            if(one.copies.size() == 1)
+            {
+                one.copies.front()->render(command_buffer, context);
+            }
+            else
+            {
+                one.copies.front()->render_copies(command_buffer, context, one.copies);
+            }
+        }
     }
 
     void renderer_3d::draw_glow_shells(const ref<scene_3d>& scene, const render_context& context)

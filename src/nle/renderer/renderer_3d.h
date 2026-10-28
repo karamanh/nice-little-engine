@@ -182,6 +182,16 @@ private:
     /// Everything with a glow shell, its shell: see set_glow_shell.
     void draw_glow_shells(const ref<scene_3d>& scene, const render_context& context);
 
+    /**
+     * @brief Records @p objects, each copy of the same thing drawn together.
+     *
+     * Whatever answers render_object_3d::copies_key() alike, with the same
+     * shader, is handed over as one lot to render_copies(); the rest are
+     * drawn one by one, as everything used to be.
+     */
+    void render_together(render_command_buffer& command_buffer, const render_context& context,
+                         const std::vector<ref<render_object_3d>>& objects);
+
     bool is_visible(const ref<render_object_3d>& ro, const glm::vec3& eye,
                     const frustum& view);
 

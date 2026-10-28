@@ -26,6 +26,10 @@ uniform mat4 u_light_space;
 // Skinning. u_joint_matrices holds, for the skin this draw belongs to,
 // joint_world_matrix * inverse_bind_matrix for every joint.
 uniform int u_skinning_enabled;
+
+uniform float u_waves;
+uniform float u_time;
+
 uniform mat4 u_joint_matrices[NLE_MAX_JOINTS];
 
 layout (location = 0) in vec3 position;
@@ -34,6 +38,11 @@ layout (location = 2) in vec3 color;
 layout (location = 3) in vec2 texture;
 layout (location = 4) in vec4 joints;
 layout (location = 5) in vec4 weights;
+
+// Drawn as copies (render_command_buffer::draw_copies), each copy's model
+// matrix comes in here, one per copy, instead of from u_model.
+uniform int u_instanced;
+layout (location = 6) in mat4 instance_model;
 
 int joint_index(float raw)
 {
@@ -58,8 +67,32 @@ mat4 skin_matrix()
     return skin / total;
 }
 
+// The swell on water: three long waves crossing at angles, so it never
+// lines up into rows. The same here and in default_frag.glsl, which shades by
+// its slopes. Height about one either way; u_waves scales it.
+vec3 wave_at(vec2 at, float time)
+{
+    const vec2 D1 = vec2(0.80, 0.60);
+    const vec2 D2 = vec2(-0.45, 0.89);
+    const vec2 D3 = vec2(0.97, -0.24);
+    const float K1 = 0.21;
+    const float K2 = 0.33;
+    const float K3 = 0.52;
+
+    float p1 = dot(D1, at) * K1 + time * 0.6;
+    float p2 = dot(D2, at) * K2 + time * 0.85;
+    float p3 = dot(D3, at) * K3 + time * 1.1;
+
+    float height = 0.5 * sin(p1) + 0.3 * sin(p2) + 0.2 * sin(p3);
+
+    // And how fast that changes along x and along z.
+    vec2 slope = 0.5 * K1 * cos(p1) * D1 + 0.3 * K2 * cos(p2) * D2 + 0.2 * K3 * cos(p3) * D3;
+
+    return vec3(height, slope);
+}
+
 void main() {
-    mat4 model = u_model;
+    mat4 model = u_instanced == 1 ? instance_model : u_model;
 
     if (u_skinning_enabled == 1)
     {
@@ -67,6 +100,14 @@ void main() {
     }
 
     vec4 world_position = model * vec4(position, 1.0);
+
+    // Only ever down from where the water was put, never up: ground just
+    // above a lake's level was dry when it was made and must stay dry, not
+    // be flooded in patches by every crest.
+    if (u_waves > 0.0)
+    {
+        world_position.y += u_waves * (wave_at(world_position.xz, u_time).x - 1.0);
+    }
 
     gl_Position = u_projection * u_view * world_position;
     io_texture_coordinates = texture;
@@ -145,6 +186,25 @@ struct Sky
     float distance_fog_near;
     float distance_fog_far;
     vec3 distance_fog_color;
+};
+
+// Fog or cloud lying in one place -- a bowl, a marsh, a ring of valleys
+// round a place -- rather than everywhere at a distance. See
+// nle::fog_bank_data.
+struct FogBank
+{
+    int enabled;
+    vec3 centre;
+    float radius;
+    float inner;
+    float bottom;
+    float top;
+    float density;
+    float billow;
+    vec3 color;
+
+    // Radians a second its billows turn round its centre.
+    float spin;
 };
 
 // The ground, when this surface is one. Off for everything else, which is
@@ -304,6 +364,10 @@ uniform int u_point_light_count;
 
 uniform Material u_material;
 uniform Sky u_sky;
+// Every bank in the level, as many as there are: see nle::MAX_FOG_BANKS.
+uniform FogBank u_fog_banks[16];
+uniform int u_fog_bank_count;
+uniform float u_waves;
 uniform vec3 u_eye_position;
 
 // A polish laid over one thing: rgb its colour, w how much. Nought for
@@ -376,6 +440,167 @@ float fog_factor()
     return clamp(f, 0.0, 1.0);
 }
 
+// Value noise, read from a picture of it (renderer_3d::make_fog_noise) that
+// repeats every 256 cells: one fetch, where working it out from a hash was
+// four -- and a look through a fog bank asks for it two dozen times.
+uniform sampler2D u_fog_noise;
+
+float fog_noise(vec2 p)
+{
+    return texture(u_fog_noise, p / 256.0).r;
+}
+
+/**
+ * The colour of a fog bank at one place in it: darker low down and in the
+ * thick of a billow, paler towards its top, and over the whole of it slow
+ * patches a little bluer or a little browner, the way storm cloud is.
+ */
+vec3 fog_bank_shade(vec3 base, vec3 p, float h, float billows)
+{
+    float lit = clamp(0.15 + 0.95 * h - 0.9 * (billows - 0.55), 0.0, 1.0);
+
+    return mix(base * vec3(0.36, 0.37, 0.43), base * 1.12, lit);
+}
+
+// The slow patches a little bluer or browner, seventy metres across: the
+// same anywhere along one look through a bank, so worked out once for it
+// rather than at every step.
+vec3 fog_bank_tint(vec3 p)
+{
+    float tint = fog_noise((p.xz + vec2(u_time * 0.4, 0.0)) / 70.0);
+    return mix(vec3(0.88, 0.93, 1.06), vec3(1.07, 1.0, 0.9), tint);
+}
+
+/**
+ * What a fog bank puts over this fragment: the colour of the cloud in rgb
+ * and how much of the fragment it hides in a. The fog along the line from
+ * the eye to here, counted only where that line is inside the bank. Thickest
+ * between its bottom and top and gone at each, thinning to the edge, in
+ * billows that drift, so it reads as cloud lying there rather than as a tint.
+ */
+vec4 fog_bank_cover(FogBank bank)
+{
+    vec3 from = u_eye_position;
+    vec3 ray = io_frag_position - from;
+    float floor_y = bank.centre.y + bank.bottom;
+    float ceiling = bank.centre.y + bank.top;
+
+    // Only the part of the line between the bottom and the top.
+    float t0 = 0.0;
+    float t1 = 1.0;
+
+    if (abs(ray.y) > 0.0001)
+    {
+        float at_floor = (floor_y - from.y) / ray.y;
+        float at_ceiling = (ceiling - from.y) / ray.y;
+
+        t0 = max(t0, min(at_floor, at_ceiling));
+        t1 = min(t1, max(at_floor, at_ceiling));
+    }
+    else if (from.y < floor_y || from.y > ceiling)
+    {
+        return vec4(0.0);
+    }
+
+    // And inside its edge.
+    vec2 offset = from.xz - bank.centre.xz;
+    float a = dot(ray.xz, ray.xz);
+    float b = 2.0 * dot(offset, ray.xz);
+    float c = dot(offset, offset) - bank.radius * bank.radius;
+
+    if (a > 0.000001)
+    {
+        float found = b * b - 4.0 * a * c;
+
+        if (found < 0.0)
+        {
+            return vec4(0.0);
+        }
+
+        float root = sqrt(found);
+        t0 = max(t0, (-b - root) / (2.0 * a));
+        t1 = min(t1, (-b + root) / (2.0 * a));
+
+        // A ring with the eye in its hole: start where the line comes out
+        // of the hole, so every step is spent where there can be cloud.
+        float hole = dot(offset, offset) - bank.inner * bank.inner;
+
+        if (bank.inner > 0.0 && hole < 0.0)
+        {
+            t0 = max(t0, (-b + sqrt(b * b - 4.0 * a * hole)) / (2.0 * a));
+        }
+    }
+    else if (c > 0.0)
+    {
+        return vec4(0.0);
+    }
+
+    if (t1 <= t0)
+    {
+        return vec4(0.0);
+    }
+
+    // As many steps as the length of the look through it needs: about one
+    // every sixth of a billow, so a billow is never stepped over, and no more
+    // than ten. Standing in a bank, most of the screen is ground or grass a
+    // few metres off, which three steps cover as well as ten did; it was all
+    // of those paying for ten that made walking into one slow.
+    const int MOST_STEPS = 10;
+    float path = (t1 - t0) * length(ray);
+    int steps = int(clamp(ceil(path / max(bank.billow * 0.16, 0.05)), 3.0, float(MOST_STEPS)));
+    float thickness = max(bank.top - bank.bottom, 0.001);
+    float step_length = path / float(steps);
+    vec2 drift = vec2(0.6, 0.25) * u_time * (bank.billow / 38.0);
+
+    // Turning: where each point is looked up in the billows is carried back
+    // round the centre by as far as the bank has turned, so the billows go
+    // round. Kept within a turn, so a clock that has run for days loses
+    // nothing to rounding.
+    float turned = mod(bank.spin * u_time, 6.2831853);
+    mat2 back = mat2(cos(turned), -sin(turned), sin(turned), cos(turned));
+    vec3 colour = vec3(0.0);
+    float through = 1.0;
+
+    for (int i = 0; i < MOST_STEPS; ++i)
+    {
+        // Done: the steps are spent, or nothing more behind can show.
+        if (i >= steps || through < 0.015)
+        {
+            break;
+        }
+
+        vec3 p = from + ray * mix(t0, t1, (float(i) + 0.5) / float(steps));
+
+        // Up from nothing at the bottom, full through the middle, and away
+        // to nothing at the top -- softer above than below, as cloud is.
+        float h = (p.y - floor_y) / thickness;
+        float body = smoothstep(0.0, 0.3, h) * (1.0 - smoothstep(0.5, 1.0, h));
+
+        // Thinning to its edge, and to its hole if it is a ring.
+        float out_from = length(p.xz - bank.centre.xz);
+        float edge = (1.0 - smoothstep(0.65, 1.0, out_from / bank.radius))
+                   * smoothstep(bank.inner, bank.inner * 1.2 + 0.001, out_from);
+
+        // Billows, leaning with height so they are not columns.
+        vec2 at = bank.centre.xz + back * (p.xz - bank.centre.xz) + vec2(p.y * 0.8, -p.y * 0.5);
+        float billows = 0.6 * fog_noise((at + drift) / bank.billow)
+                      + 0.4 * fog_noise((at - drift * 1.5) / (bank.billow * 0.37));
+
+        float thick = bank.density * body * edge * smoothstep(0.42, 0.72, billows) * 2.4 * step_length;
+        float taken = 1.0 - exp(-thick);
+
+        // Front to back, so what is nearer covers what is behind it.
+        colour += through * taken * fog_bank_shade(bank.color, p, h, billows);
+        through *= 1.0 - taken;
+    }
+
+    float hidden = 1.0 - through;
+
+    colour *= fog_bank_tint(from + ray * mix(t0, t1, 0.5));
+
+    return vec4(colour / max(hidden, 0.0001), hidden);
+}
+
 /**
  * How much of this fragment the sun can actually reach.
  *
@@ -429,6 +654,30 @@ float sunlight_reaching(vec3 normal)
     return mix(0.1, 1.0, lit);
 }
 
+// The swell on water: three long waves crossing at angles, so it never
+// lines up into rows. The same here and in default_frag.glsl, which shades by
+// its slopes. Height about one either way; u_waves scales it.
+vec3 wave_at(vec2 at, float time)
+{
+    const vec2 D1 = vec2(0.80, 0.60);
+    const vec2 D2 = vec2(-0.45, 0.89);
+    const vec2 D3 = vec2(0.97, -0.24);
+    const float K1 = 0.21;
+    const float K2 = 0.33;
+    const float K3 = 0.52;
+
+    float p1 = dot(D1, at) * K1 + time * 0.6;
+    float p2 = dot(D2, at) * K2 + time * 0.85;
+    float p3 = dot(D3, at) * K3 + time * 1.1;
+
+    float height = 0.5 * sin(p1) + 0.3 * sin(p2) + 0.2 * sin(p3);
+
+    // And how fast that changes along x and along z.
+    vec2 slope = 0.5 * K1 * cos(p1) * D1 + 0.3 * K2 * cos(p2) * D2 + 0.2 * K3 * cos(p3) * D3;
+
+    return vec3(height, slope);
+}
+
 void main() {
     vec3 normal = normalize(io_normal);
     vec3 view_direction = normalize(u_eye_position - io_frag_position);
@@ -480,6 +729,34 @@ void main() {
 
     io_color = vec4(base_color.rgb * light_factor, base_color.a * u_material.dissolve);
 
+    // Water, shaded by its own waves whether or not it takes light: darker
+    // in the troughs facing away, a glint where a slope turns the sun to the
+    // eye, and the sky's pale towards the horizon, where water is a mirror.
+    if (u_waves > 0.0)
+    {
+        vec3 wave = wave_at(io_frag_position.xz, u_time);
+
+        // Ripples on the swell, too small for the mesh to carry.
+        vec2 ripple = vec2(fog_noise(io_frag_position.xz * 0.9 + u_time * 0.8),
+                           fog_noise(io_frag_position.zx * 0.9 - u_time * 0.6)) - 0.5;
+
+        // Steeper than the swell really is, for the light only: a slope of a
+        // few degrees does not show, and the mesh already carries the height.
+        vec3 surface = normalize(vec3(-(4.0 * u_waves * wave.y + 0.3 * ripple.x), 1.0,
+                                      -(4.0 * u_waves * wave.z + 0.3 * ripple.y)));
+
+        vec3 towards_sun = normalize(u_directional_light.direction);
+        float facing = dot(surface, towards_sun);
+        float glint = pow(max(dot(reflect(-towards_sun, surface), view_direction), 0.0), 90.0);
+        float mirror = pow(1.0 - max(dot(surface, view_direction), 0.0), 4.0);
+
+        vec3 water = io_color.rgb * (0.75 + 0.55 * facing);
+        water = mix(water, u_sky.distance_fog_color, mirror * 0.55);
+        water += u_directional_light.color * glint * 0.7;
+
+        io_color = vec4(water, min(io_color.a + mirror * 0.3 + glint, 1.0));
+    }
+
     // A sheen, for something that has been worked on: brighter all over, a
     // rim of light round its edge and a glint where the sun catches it, each
     // more the further it has been taken. u_sheen.w is how far: nought to
@@ -516,6 +793,18 @@ void main() {
     {
         io_color.rgb = mix(io_color.rgb, u_sky.distance_fog_color,
                            min(fog_factor(), u_material.fog_limit));
+    }
+
+    // After the haze of distance, not before: a cloud in the bowl is
+    // nearer than the hills far off behind it, and hides them as it hides
+    // the sky.
+    for (int i = 0; i < u_fog_bank_count; ++i)
+    {
+        if (u_fog_banks[i].enabled == 1)
+        {
+            vec4 cloud = fog_bank_cover(u_fog_banks[i]);
+            io_color.rgb = mix(io_color.rgb, cloud.rgb, cloud.a);
+        }
     }
 }
 )GLSL";

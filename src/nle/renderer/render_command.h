@@ -19,6 +19,10 @@
 namespace nle
 {
 
+/// Where a shader drawn with draw_copies() reads each copy's model matrix: a
+/// mat4 attribute, so this location and the three after it.
+constexpr unsigned int NLE_INSTANCE_TRANSFORM_LOCATION = 6;
+
 // Forward declarations
 class shader;
 class texture;
@@ -37,6 +41,7 @@ enum class command_type
     use_texture,
     draw_elements,
     draw_elements_instanced,
+    draw_copies,
     set_depth_mask,
     set_blending
 };
@@ -73,6 +78,23 @@ struct draw_elements_data
 };
 
 /**
+ * @brief One mesh drawn once for each of a list of placements.
+ *
+ * What a town's props are: the same tree, the same fence, many times over,
+ * differing in nothing but where they stand. Each placement goes to the
+ * vertex shader as its own model matrix, read per copy rather than set as a
+ * uniform per draw.
+ */
+struct draw_copies_data
+{
+    unsigned int primitive_type;
+    unsigned int vao;
+    unsigned int ebo;
+    size_t count;
+    std::vector<glm::mat4> transforms;
+};
+
+/**
  * @brief How what is being drawn is combined with what is already there.
  *
  * Only the two that matter so far. Opaque geometry writes over the frame;
@@ -97,6 +119,7 @@ struct render_command
         uniform_data,              // uniform data
         texture_bind_data,         // use_texture
         draw_elements_data,        // draw_elements, draw_elements_instanced
+        draw_copies_data,          // draw_copies
         bool,                      // set_depth_mask
         blend_mode                 // set_blending
     > data;
@@ -128,6 +151,16 @@ public:
      */
     void draw_elements_instanced(unsigned int primitive_type, unsigned int vao,
                                  unsigned int ebo, size_t count, size_t instances);
+
+    /**
+     * @brief The same draw once for each of @p transforms, in one call.
+     *
+     * For a shader that reads its model matrix per copy (see
+     * NLE_INSTANCE_TRANSFORM_LOCATION) and has been told to with
+     * u_instanced; the copies need nothing else from this side.
+     */
+    void draw_copies(unsigned int primitive_type, unsigned int vao, unsigned int ebo, size_t count,
+                     std::vector<glm::mat4> transforms);
 
     void set_depth_mask(bool mask);
     void set_blending(blend_mode mode);

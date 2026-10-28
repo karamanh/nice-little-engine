@@ -95,6 +95,35 @@ public:
      */
     virtual float bounding_radius() const { return 0.0f; }
 
+    /**
+     * @brief What it may be drawn together with, or nothing.
+     *
+     * Two objects that answer the same are the same thing in different
+     * places -- a model's copies, with nothing of their own to set -- and the
+     * renderer draws all of those it can see in one go with render_copies(),
+     * rather than each with a draw of its own per part. A town is hundreds of
+     * the same tree and the same fence, and drawn one by one they were most
+     * of what a frame cost.
+     *
+     * Nothing by default: anything that has not said so is drawn by itself.
+     */
+    virtual const void* copies_key() { return nullptr; }
+
+    /**
+     * @brief Records the draws for every one of @p copies, this among them.
+     *
+     * Only ever handed things that answered copies_key() as this did, and
+     * drawn with the same shader.
+     */
+    virtual void render_copies(render_command_buffer& command_buffer, const render_context& context,
+                               const std::vector<render_object_3d*>& copies)
+    {
+        for(auto* one : copies)
+        {
+            one->render(command_buffer, context);
+        }
+    }
+
     virtual void set_render_mode(enum render_mode rm);
     virtual enum render_mode render_mode() const;
 

@@ -97,6 +97,12 @@ private:
     GLuint m_current_vao;
     GLuint m_current_ebo;
 
+    /// Where draw_copies() puts its placements on the way to the shader:
+    /// one buffer, filled anew for each such draw.
+    GLuint m_copies_buffer = 0;
+
+    void draw_copies(const draw_copies_data& data);
+
     /// -1 means "unknown", forcing the next command through.
     GLint m_current_polygon_mode;
     GLint m_current_depth_mask;

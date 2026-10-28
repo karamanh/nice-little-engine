@@ -75,6 +75,9 @@ struct FogBank
     float density;
     float billow;
     vec3 color;
+
+    // Radians a second its billows turn round its centre.
+    float spin;
 };
 
 uniform FogBank u_fog_banks[16];
@@ -183,6 +186,13 @@ vec4 fog_bank_cover(FogBank bank, vec3 dir)
     float thickness = max(bank.top - bank.bottom, 0.001);
     float step_length = path / float(steps);
     vec2 drift = vec2(0.6, 0.25) * u_time * (bank.billow / 38.0);
+
+    // Turning: where each point is looked up in the billows is carried back
+    // round the centre by as far as the bank has turned, so the billows go
+    // round. Kept within a turn, so a clock that has run for days loses
+    // nothing to rounding.
+    float turned = mod(bank.spin * u_time, 6.2831853);
+    mat2 back = mat2(cos(turned), -sin(turned), sin(turned), cos(turned));
     vec3 colour = vec3(0.0);
     float through = 1.0;
 
@@ -207,7 +217,7 @@ vec4 fog_bank_cover(FogBank bank, vec3 dir)
                    * smoothstep(bank.inner, bank.inner * 1.2 + 0.001, out_from);
 
         // Billows, leaning with height so they are not columns.
-        vec2 at = p.xz + vec2(p.y * 0.8, -p.y * 0.5);
+        vec2 at = bank.centre.xz + back * (p.xz - bank.centre.xz) + vec2(p.y * 0.8, -p.y * 0.5);
         float billows = 0.6 * fog_noise((at + drift) / bank.billow)
                       + 0.4 * fog_noise((at - drift * 1.5) / (bank.billow * 0.37));
 
@@ -385,6 +395,7 @@ void sky::render(render_command_buffer& command_buffer, const render_context& co
         command_buffer.set_uniform(at + "density", bank.density);
         command_buffer.set_uniform(at + "billow", std::max(bank.billow, 1.0f));
         command_buffer.set_uniform(at + "color", bank.color);
+        command_buffer.set_uniform(at + "spin", glm::radians(bank.spin));
     }
 
     command_buffer.set_depth_mask(false);

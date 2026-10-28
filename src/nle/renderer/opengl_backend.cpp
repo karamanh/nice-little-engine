@@ -25,6 +25,10 @@ opengl_backend::opengl_backend()
 
 opengl_backend::~opengl_backend()
 {
+    if (m_copies_buffer != 0)
+    {
+        glDeleteBuffers(1, &m_copies_buffer);
+    }
 }
 
 void opengl_backend::begin_frame(const render_context& context)
@@ -201,6 +205,7 @@ void opengl_backend::upload_frame_uniforms(const ref<class shader>& shader)
         set_float(at + "density", bank.density);
         set_float(at + "billow", std::max(bank.billow, 1.0f));
         set_vec3(at + "color", bank.color);
+        set_float(at + "spin", glm::radians(bank.spin));
     }
 }
 
@@ -372,6 +377,12 @@ void opengl_backend::execute_command(const render_command& cmd)
             break;
         }
 
+        case command_type::draw_copies:
+        {
+            draw_copies(std::get<draw_copies_data>(cmd.data));
+            break;
+        }
+
         case command_type::set_blending:
         {
             const blend_mode mode = std::get<blend_mode>(cmd.data);
@@ -419,6 +430,55 @@ void opengl_backend::execute_command(const render_command& cmd)
             m_current_depth_mask = mask;
             break;
         }
+    }
+}
+
+void opengl_backend::draw_copies(const draw_copies_data& data)
+{
+    if (m_copies_buffer == 0)
+    {
+        glGenBuffers(1, &m_copies_buffer);
+    }
+
+    if (data.vao != m_current_vao)
+    {
+        glBindVertexArray(data.vao);
+        m_current_vao = data.vao;
+    }
+    if (data.ebo != m_current_ebo)
+    {
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, data.ebo);
+        m_current_ebo = data.ebo;
+    }
+
+    // Orphaned and filled again each time, so a draw still reading the
+    // last lot is never waited on.
+    const auto bytes = static_cast<GLsizeiptr>(data.transforms.size() * sizeof(glm::mat4));
+    glBindBuffer(GL_ARRAY_BUFFER, m_copies_buffer);
+    glBufferData(GL_ARRAY_BUFFER, bytes, nullptr, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, data.transforms.data());
+
+    // A mat4 is four vec4 attributes, a column each, moving on once per copy
+    // rather than once per vertex.
+    for (GLuint column = 0; column < 4; ++column)
+    {
+        const GLuint at = NLE_INSTANCE_TRANSFORM_LOCATION + column;
+        glEnableVertexAttribArray(at);
+        glVertexAttribPointer(at, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4),
+                              reinterpret_cast<const void*>(sizeof(glm::vec4) * column));
+        glVertexAttribDivisor(at, 1);
+    }
+
+    glDrawElementsInstanced(data.primitive_type, static_cast<GLsizei>(data.count), GL_UNSIGNED_INT,
+                            nullptr, static_cast<GLsizei>(data.transforms.size()));
+    ++m_statistics.draw_calls;
+
+    // Off again, so the mesh's own draws -- and anything else sharing its
+    // vertex array -- read only what they always have.
+    for (GLuint column = 0; column < 4; ++column)
+    {
+        glVertexAttribDivisor(NLE_INSTANCE_TRANSFORM_LOCATION + column, 0);
+        glDisableVertexAttribArray(NLE_INSTANCE_TRANSFORM_LOCATION + column);
     }
 }
 

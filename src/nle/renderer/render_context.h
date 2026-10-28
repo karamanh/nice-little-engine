@@ -99,6 +99,15 @@ struct fog_bank_data
     /// How big its billows are across, in metres: small for a bowl, large
     /// for weather lying over a range.
     float billow = 38.0f;
+
+    /**
+     * @brief How fast its billows turn round its middle, in degrees a
+     *        second; clockwise seen from above, anticlockwise if negative.
+     *
+     * For cloud wrapped round something -- a citadel's towers -- which
+     * reads as weather going round it rather than blowing past.
+     */
+    float spin = 0.0f;
 };
 
 struct fog_data
