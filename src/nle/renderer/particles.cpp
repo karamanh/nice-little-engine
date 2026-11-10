@@ -3,7 +3,7 @@
 #include "render_command.h"
 #include "shader.h"
 
-#include <GL/glew.h>
+#include "gl.h"
 
 #include <algorithm>
 

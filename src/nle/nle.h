@@ -12,7 +12,7 @@
 #pragma once
 
 #include "core/ref.h"
-#include "window/window_glfw.h"
+#include "window/platform_window.h"
 #include "renderer/renderer_3d.h"
 #include "splash.h"
 
@@ -39,9 +39,18 @@ public:
         unsigned int height = NLE_WINDOW_DEFAULT_HEIGHT,
         const std::string& title = NLE_WINDOW_DEFAULT_TITLE);
 
+    /**
+     * @brief A renderer for a window that is already open.
+     *
+     * For a program with something to show before the renderer can be made
+     * -- one that has to fetch what the renderer reads first -- and that
+     * goes on in the same window afterwards.
+     */
+    explicit nle(ref<platform_window> window);
+
     ~nle();
 
-    ref<class window_glfw> window();
+    ref<platform_window> window();
 
     ref<class renderer_3d> renderer_3d(); 
 
@@ -56,7 +65,7 @@ public:
     void run();
 
 private:
-    ref<class window_glfw> m_window;
+    ref<platform_window> m_window;
     ref<class renderer_3d> m_renderer;
 
     std::string m_splash_picture;

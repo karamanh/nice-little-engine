@@ -162,6 +162,17 @@ void window_glfw::pace(double frame_started)
     }
 }
 
+void window_glfw::present_frame()
+{
+    glfwSwapBuffers(m_handle);
+    glfwPollEvents();
+}
+
+double window_glfw::seconds() const
+{
+    return glfwGetTime();
+}
+
 void window_glfw::close()
 {
     glfwSetWindowShouldClose(m_handle, GLFW_TRUE);

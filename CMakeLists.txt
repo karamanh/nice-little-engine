@@ -48,7 +48,20 @@ endif()
 option(NLE_BUNDLED_DEPENDENCIES "Download and build the libraries the engine uses rather than use the system's"
        ${NLE_BUNDLED_DEFAULT})
 
-find_package(OpenGL REQUIRED)
+# A phone: SDL's window and input instead of GLFW's, and OpenGL ES 3 instead
+# of desktop OpenGL through GLEW. See window/platform_window.h and
+# renderer/gl.h.
+if(ANDROID)
+    set(NLE_SDL_WINDOW_DEFAULT ON)
+else()
+    set(NLE_SDL_WINDOW_DEFAULT OFF)
+endif()
+
+option(NLE_SDL_WINDOW "Open the window through SDL, with OpenGL ES 3, rather than GLFW" ${NLE_SDL_WINDOW_DEFAULT})
+
+if(NOT NLE_SDL_WINDOW)
+    find_package(OpenGL REQUIRED)
+endif()
 
 if(NLE_BUNDLED_DEPENDENCIES)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/bundled_dependencies.cmake")
@@ -117,6 +130,13 @@ endif()
 
 file(GLOB_RECURSE NLE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/nle/*.cpp")
 
+# One window system or the other.
+if(NLE_SDL_WINDOW)
+    list(FILTER NLE_SOURCES EXCLUDE REGEX "_glfw\\.cpp$")
+else()
+    list(FILTER NLE_SOURCES EXCLUDE REGEX "_sdl\\.cpp$")
+endif()
+
 # stb's implementation, which a Linux system supplies as a library.
 if(NLE_BUNDLED_DEPENDENCIES)
     list(APPEND NLE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/vendor/include-shim/stb_implementation.cpp")
@@ -138,6 +158,10 @@ target_compile_options(nle PRIVATE -Wall -Wextra)
 
 if(NLE_ENABLE_DEBUG_OUTPUT)
     target_compile_definitions(nle PUBLIC DEBUG)
+endif()
+
+if(NLE_SDL_WINDOW)
+    target_compile_definitions(nle PUBLIC NLE_SDL_WINDOW NLE_GLES)
 endif()
 
 target_link_libraries(nle PUBLIC nle_dependencies)

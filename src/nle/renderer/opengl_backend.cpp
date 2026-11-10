@@ -235,7 +235,10 @@ void opengl_backend::execute_command(const render_command& cmd)
                 ++m_statistics.redundant_commands_dropped;
                 break;
             }
+            // Wireframe is a desktop's: OpenGL ES draws filled or not at all.
+#ifndef NLE_GLES
             glPolygonMode(data.front_and_back, data.mode);
+#endif
             m_current_polygon_mode = static_cast<GLint>(data.mode);
             break;
         }

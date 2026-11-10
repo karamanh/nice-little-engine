@@ -38,6 +38,9 @@ public:
     void set_cursor_visibility(bool visible);
     bool cursor_visibility();
 
+    void present_frame() override;
+    double seconds() const override;
+
     /**
      * @brief The most frames a second to draw, or nought for as many as the
      *        machine can.

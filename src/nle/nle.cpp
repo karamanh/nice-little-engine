@@ -8,7 +8,14 @@ namespace nle
 nle::nle(unsigned int width, unsigned int height, const std::string& title)
     : m_splash_picture(std::string(NLE_ASSET_DIR) + "/nle-splash.png")
 {
-    m_window = make_ref<class window_glfw>(width, height, title);
+    m_window = make_ref<platform_window>(width, height, title);
+    m_renderer = make_ref<class renderer_3d>(m_window);
+}
+
+nle::nle(ref<platform_window> window)
+    : m_window(window)
+    , m_splash_picture(std::string(NLE_ASSET_DIR) + "/nle-splash.png")
+{
     m_renderer = make_ref<class renderer_3d>(m_window);
 }
 
@@ -16,7 +23,7 @@ nle::~nle()
 {
 }
 
-ref<window_glfw> nle::window()
+ref<platform_window> nle::window()
 {
     return m_window;
 }

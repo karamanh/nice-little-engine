@@ -38,4 +38,40 @@ namespace nle
             set_key_state(i, static_cast<bool>(state));
         }
     }
+
+    gamepad input_handler_glfw::pad() const
+    {
+        gamepad state;
+
+        for(int id = GLFW_JOYSTICK_1; id <= GLFW_JOYSTICK_LAST; ++id)
+        {
+            GLFWgamepadstate read;
+
+            if(!glfwJoystickIsGamepad(id) || !glfwGetGamepadState(id, &read))
+            {
+                continue;
+            }
+
+            state.connected = true;
+
+            state.left_x = read.axes[GLFW_GAMEPAD_AXIS_LEFT_X];
+            state.left_y = read.axes[GLFW_GAMEPAD_AXIS_LEFT_Y];
+            state.right_x = read.axes[GLFW_GAMEPAD_AXIS_RIGHT_X];
+            state.right_y = read.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y];
+
+            // GLFW's triggers rest at -1.
+            state.left_trigger = (read.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] + 1.0f) * 0.5f;
+            state.right_trigger = (read.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] + 1.0f) * 0.5f;
+
+            // The same order as gamepad::button, which was taken from here.
+            for(size_t i = 0; i < gamepad::count; ++i)
+            {
+                state.held[i] = read.buttons[i] == GLFW_PRESS;
+            }
+
+            break;
+        }
+
+        return state;
+    }
 } // namespace nle

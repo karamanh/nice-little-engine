@@ -202,7 +202,10 @@ bool bloom::make_target(target& t, int width, int height, bool with_depth)
     // Floating point, which is the whole reason this exists: a light at seven
     // times intensity has to survive being written down before anything can
     // notice it is brighter than white.
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, t.width, t.height, 0, GL_RGBA, GL_FLOAT, nullptr);
+    // Half floats, which a phone can draw into where it can draw into floats
+    // at all; if it cannot, the target does not complete and there is no
+    // bloom.
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, t.width, t.height, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

@@ -13,7 +13,7 @@
 #include "render_command.h"
 #include "render_context.h"
 
-#include <GL/glew.h>
+#include "gl.h"
 
 #include <unordered_set>
 

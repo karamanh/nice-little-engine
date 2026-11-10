@@ -51,8 +51,32 @@ public:
     virtual void set_cursor_visibility(bool visible) = 0;
     virtual bool cursor_visibility() = 0;
 
+    /**
+     * @brief The window's size in its own units: what the interface is laid
+     *        out in and the pointer is reported in.
+     *
+     * The same as its pixels on a desktop. On a phone, whose pixels are far
+     * smaller, a unit is several of them, so an interface laid out for a
+     * desktop comes out the size of a desktop's on the phone too.
+     */
     int width() { return m_width; }
     int height() { return m_height; }
+
+    /// Its size in the screen's own pixels: what is drawn into.
+    int drawable_width() { return m_drawable_width > 0 ? m_drawable_width : m_width; }
+    int drawable_height() { return m_drawable_height > 0 ? m_drawable_height : m_height; }
+
+    /**
+     * @brief Shows what has been drawn and takes in what has happened since.
+     *
+     * The end of a frame, for anything that draws one outside display()'s
+     * loop: a loading screen, which has to be seen while the loop is held up
+     * loading.
+     */
+    virtual void present_frame() = 0;
+
+    /// Seconds since the window was made.
+    virtual double seconds() const = 0;
     bool closed() { return m_closed; }
     std::function<void()>& render_3d() { return m_render_3d; }
     std::function<void()>& render_ui() { return m_render_ui; }
@@ -70,6 +94,8 @@ protected:
     handle_type m_handle;
     int m_width;
     int m_height;
+    int m_drawable_width = 0;
+    int m_drawable_height = 0;
     bool m_closed = false;
     window_mode m_mode = window_mode::windowed;
     bool m_cursor_visible = false;

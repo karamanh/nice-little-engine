@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <GL/glew.h>
+#include "gl.h"
 
 #include <string>
 #include <future>
@@ -30,7 +30,12 @@ enum class shader_type
 {
     vertex = GL_VERTEX_SHADER,
     fragment = GL_FRAGMENT_SHADER,
+#ifdef NLE_GLES
+    // OpenGL ES 3.0 has none, and the engine uses none.
+    geometry = 0x8DD9
+#else
     geometry = GL_GEOMETRY_SHADER
+#endif
 };
 
 class shader

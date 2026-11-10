@@ -5,7 +5,11 @@
 // From the system imgui, which is also the one linked. See the note in
 // CMakeLists.txt about vendor/imgui.
 #include <imgui.h>
+#ifdef NLE_SDL_WINDOW
+#include <backends/imgui_impl_sdl2.h>
+#else
 #include <backends/imgui_impl_glfw.h>
+#endif
 #include <backends/imgui_impl_opengl3.h>
 
 #include <string>
@@ -13,7 +17,7 @@
 namespace nle
 {
 
-imgui_layer::imgui_layer(ref<window_glfw> window, unsigned int glsl_version)
+imgui_layer::imgui_layer(ref<platform_window> window, unsigned int glsl_version)
     : m_window(window)
 {
     IMGUI_CHECKVERSION();
@@ -22,12 +26,37 @@ imgui_layer::imgui_layer(ref<window_glfw> window, unsigned int glsl_version)
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
+#ifdef NLE_SDL_WINDOW
+    (void)glsl_version;
+
+    ImGui_ImplSDL2_InitForOpenGL(m_window->handle(), SDL_GL_GetCurrentContext());
+    ImGui_ImplOpenGL3_Init("#version 300 es");
+
+    // Keys, text and the wheel as SDL says them. Not the pointer: that is
+    // whatever the game made of the fingers, and is given in begin_frame().
+    m_window->on_event() = [](const SDL_Event& event) {
+        switch(event.type)
+        {
+            case SDL_MOUSEMOTION:
+            case SDL_MOUSEBUTTONDOWN:
+            case SDL_MOUSEBUTTONUP:
+            case SDL_FINGERDOWN:
+            case SDL_FINGERUP:
+            case SDL_FINGERMOTION:
+                return;
+
+            default:
+                ImGui_ImplSDL2_ProcessEvent(&event);
+        }
+    };
+#else
     // imgui installs its own GLFW callbacks and chains to any already there,
     // which is what lets it see input without the engine forwarding anything.
     ImGui_ImplGlfw_InitForOpenGL(m_window ? m_window->handle() : nullptr, true);
 
     const std::string version = "#version " + std::to_string(glsl_version);
     ImGui_ImplOpenGL3_Init(version.c_str());
+#endif
 
     ImGui::StyleColorsDark();
 }
@@ -35,7 +64,12 @@ imgui_layer::imgui_layer(ref<window_glfw> window, unsigned int glsl_version)
 imgui_layer::~imgui_layer()
 {
     ImGui_ImplOpenGL3_Shutdown();
+#ifdef NLE_SDL_WINDOW
+    m_window->on_event() = nullptr;
+    ImGui_ImplSDL2_Shutdown();
+#else
     ImGui_ImplGlfw_Shutdown();
+#endif
     ImGui::DestroyContext();
 }
 
@@ -47,7 +81,28 @@ void imgui_layer::begin_frame()
     }
 
     ImGui_ImplOpenGL3_NewFrame();
+#ifdef NLE_SDL_WINDOW
+    ImGui_ImplSDL2_NewFrame();
+
+    // Laid out in the window's units and drawn in the screen's pixels.
+    ImGuiIO& io = ImGui::GetIO();
+    const float scale = m_window->pixels_per_unit();
+
+    io.DisplaySize = ImVec2(static_cast<float>(m_window->width()), static_cast<float>(m_window->height()));
+    io.DisplayFramebufferScale = ImVec2(scale, scale);
+
+    const auto input = m_window->input_handler();
+
+    io.AddMouseSourceEvent(input->touched() ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
+    io.AddMousePosEvent(static_cast<float>(input->pointer_x()), static_cast<float>(input->pointer_y()));
+
+    for(int button = 0; button < 3; ++button)
+    {
+        io.AddMouseButtonEvent(button, input->pointer_down(button));
+    }
+#else
     ImGui_ImplGlfw_NewFrame();
+#endif
     ImGui::NewFrame();
 
     m_frame_open = true;
@@ -62,6 +117,20 @@ void imgui_layer::end_frame()
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+#ifdef NLE_SDL_WINDOW
+    // The phone's keyboard, for as long as something is being typed into.
+    const bool typing = ImGui::GetIO().WantTextInput;
+
+    if(typing && !SDL_IsTextInputActive())
+    {
+        SDL_StartTextInput();
+    }
+    else if(!typing && SDL_IsTextInputActive())
+    {
+        SDL_StopTextInput();
+    }
+#endif
 
     m_frame_open = false;
 }

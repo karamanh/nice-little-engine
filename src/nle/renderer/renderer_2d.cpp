@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include <GL/glew.h>
+#include "gl.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 

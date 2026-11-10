@@ -184,7 +184,11 @@ namespace nle
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, format, m_width, m_height, 0, format, GL_UNSIGNED_BYTE, pixels);
+        // Sized, for the one and two channel kinds: OpenGL ES takes no
+        // other, and a desktop takes either.
+        const int stored = format == GL_RED ? GL_R8 : format == GL_RG ? GL_RG8 : format;
+
+        glTexImage2D(GL_TEXTURE_2D, 0, stored, m_width, m_height, 0, format, GL_UNSIGNED_BYTE, pixels);
         glGenerateMipmap(GL_TEXTURE_2D);
 
         glBindTexture(GL_TEXTURE_2D, 0);

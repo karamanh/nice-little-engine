@@ -12,7 +12,7 @@
 #pragma once
 
 #include "../core/clock.h"
-#include "../window/window_glfw.h"
+#include "../window/platform_window.h"
 #include "../scene/scene_3d.h"
 #include "render_command.h"
 #include "render_context.h"
@@ -51,13 +51,13 @@ public:
     static std::vector<fog_bank_data> banks_in_sight(const fog_data& fog, const glm::vec3& eye,
                                                      const frustum& view);
 
-    renderer_3d(ref<window_glfw> render_target);
+    renderer_3d(ref<platform_window> render_target);
     virtual ~renderer_3d();
 
     void set_current_scene(ref<scene_3d> scene);
     ref<scene_3d> current_scene();
 
-    ref<window_glfw> render_target();
+    ref<platform_window> render_target();
 
     void set_render_layer_attribute(enum render_layer layer, const render_layer_attribute& attribute);
     render_layer_attribute render_layer_attribute_of(enum render_layer layer);
@@ -119,7 +119,7 @@ public:
                    const glm::vec4& clear = glm::vec4(0.0f));
 
 private:
-    ref<window_glfw> m_render_target;
+    ref<platform_window> m_render_target;
 
     ref<scene_3d> m_current_scene;
 

@@ -12,7 +12,7 @@
 #pragma once
 
 #include "../core/ref.h"
-#include "../window/window_glfw.h"
+#include "../window/platform_window.h"
 
 #include <string>
 
@@ -47,7 +47,8 @@ class imgui_layer
 {
 public:
     /// @param glsl_version the version to compile imgui's shaders against.
-    explicit imgui_layer(ref<window_glfw> window, unsigned int glsl_version = 330);
+    /// On OpenGL ES the version is always ES 3.00's, whatever is asked.
+    explicit imgui_layer(ref<platform_window> window, unsigned int glsl_version = 330);
     ~imgui_layer();
 
     imgui_layer(const imgui_layer&) = delete;
@@ -108,7 +109,7 @@ public:
     bool wants_text() const;
 
 private:
-    ref<window_glfw> m_window;
+    ref<platform_window> m_window;
     bool m_frame_open = false;
 
     /// imgui keeps the pointer, not the string, so this has to outlive it.

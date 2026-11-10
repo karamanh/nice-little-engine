@@ -2,7 +2,7 @@
 
 #include "../core/utils.h"
 
-#include <GL/glew.h>
+#include "gl.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -79,8 +79,10 @@ bool shadow_map::ensure_resources()
     glGenTextures(1, &m_depth);
 
     glBindTexture(GL_TEXTURE_2D, m_depth);
+    // Unsigned integers, which is what OpenGL ES insists a 24 bit depth is
+    // given as -- even with nothing to give.
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_resolution, m_resolution, 0,
-                 GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+                 GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -88,12 +90,18 @@ bool shadow_map::ensure_resources()
     // Clamped to a border of "as far away as possible", so that anything
     // outside the box is lit rather than pitch black. Without this the world
     // past the shadow distance goes dark, which is a great deal worse than
-    // having no shadows out there.
+    // having no shadows out there. OpenGL ES has no border, so there the
+    // shader says it instead.
+#ifdef NLE_GLES
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+#else
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
     const float border[] = { 1.0f, 1.0f, 1.0f, 1.0f };
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+#endif
 
     // Compared rather than read, so the sampler does the depth test itself
     // and returns how much of the fragment is lit.
@@ -105,7 +113,8 @@ bool shadow_map::ensure_resources()
 
     // Depth only: there is no colour in this pass and saying so is what
     // makes it cheap.
-    glDrawBuffer(GL_NONE);
+    const GLenum no_colour = GL_NONE;
+    glDrawBuffers(1, &no_colour);
     glReadBuffer(GL_NONE);
 
     const GLenum state = glCheckFramebufferStatus(GL_FRAMEBUFFER);

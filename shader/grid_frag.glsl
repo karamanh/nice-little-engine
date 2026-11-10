@@ -32,7 +32,7 @@ void main()
     }
     else
     {
-        cell_size *= pow(cell_size, floor(a) + 1);
+        cell_size *= pow(cell_size, floor(a) + 1.0);
     }
 
     float dx = mod(abs(io_position.x), cell_size);

@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include <GL/glew.h>
+#include "gl.h"
 
 #include <glm/glm.hpp>
 

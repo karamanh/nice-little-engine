@@ -2,7 +2,7 @@
 
 #include "../core/utils.h"
 
-#include <GL/glew.h>
+#include "gl.h"
 
 #include <algorithm>
 

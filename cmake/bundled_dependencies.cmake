@@ -10,32 +10,41 @@ include(FetchContent)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-# ---- GLFW: windows and input ---------------------------------------------------
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+if(NOT NLE_SDL_WINDOW)
+    # ---- GLFW: windows and input ---------------------------------------------------
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 3.4
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL)
+    FetchContent_Declare(glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL)
 
-# ---- GLEW: OpenGL's functions ----------------------------------------------------
-set(glew-cmake_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(glew-cmake_BUILD_STATIC ON CACHE BOOL "" FORCE)
-set(ONLY_LIBS ON CACHE BOOL "" FORCE)
+    # ---- GLEW: OpenGL's functions ----------------------------------------------------
+    set(glew-cmake_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(glew-cmake_BUILD_STATIC ON CACHE BOOL "" FORCE)
+    set(ONLY_LIBS ON CACHE BOOL "" FORCE)
 
-FetchContent_Declare(glew
-    GIT_REPOSITORY https://github.com/Perlmint/glew-cmake.git
-    GIT_TAG glew-cmake-2.2.0
-    GIT_SHALLOW TRUE
-    EXCLUDE_FROM_ALL)
+    FetchContent_Declare(glew
+        GIT_REPOSITORY https://github.com/Perlmint/glew-cmake.git
+        GIT_TAG glew-cmake-2.2.0
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL)
+endif()
 
-# ---- SDL2 and SDL2_mixer: sound ----------------------------------------------------
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
+# ---- SDL2 and SDL2_mixer: sound, and on a phone the window too ---------------------
+# A library of its own on Android, which is what SDL's half in Java loads by
+# name before the game's.
+if(ANDROID)
+    set(SDL_SHARED ON CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+else()
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+endif()
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
 set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
 
@@ -90,7 +99,19 @@ FetchContent_Declare(imgui
     GIT_SHALLOW TRUE
     EXCLUDE_FROM_ALL)
 
-FetchContent_MakeAvailable(glfw glew SDL2 SDL2_mixer glm imgui)
+if(NLE_SDL_WINDOW)
+    FetchContent_MakeAvailable(SDL2)
+
+    # The mixer is static and asks for a static SDL by name; on Android SDL is
+    # the shared library, and the mixer links that instead.
+    if(ANDROID AND NOT TARGET SDL2::SDL2-static)
+        add_library(SDL2::SDL2-static ALIAS SDL2)
+    endif()
+
+    FetchContent_MakeAvailable(SDL2_mixer glm imgui)
+else()
+    FetchContent_MakeAvailable(glfw glew SDL2 SDL2_mixer glm imgui)
+endif()
 
 add_library(nle_imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp"
@@ -98,23 +119,41 @@ add_library(nle_imgui STATIC
     "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp"
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp")
 
 target_include_directories(nle_imgui PUBLIC "${imgui_SOURCE_DIR}")
-target_link_libraries(nle_imgui PUBLIC glfw)
+
+if(NLE_SDL_WINDOW)
+    target_sources(nle_imgui PRIVATE "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp")
+    target_link_libraries(nle_imgui PUBLIC SDL2::SDL2)
+else()
+    target_sources(nle_imgui PRIVATE "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp")
+    target_link_libraries(nle_imgui PUBLIC glfw)
+endif()
 
 # ---- all of it, as one thing to link --------------------------------------------
 add_library(nle_dependencies INTERFACE)
 
-target_link_libraries(nle_dependencies INTERFACE
-    OpenGL::GL
-    glfw
-    libglew_static
-    glm::glm
-    nle_imgui
-    SDL2_mixer::SDL2_mixer-static
-    SDL2::SDL2-static)
+if(ANDROID)
+    target_link_libraries(nle_dependencies INTERFACE
+        glm::glm
+        nle_imgui
+        SDL2_mixer::SDL2_mixer-static
+        SDL2::SDL2
+        GLESv3
+        EGL
+        android
+        log)
+else()
+    target_link_libraries(nle_dependencies INTERFACE
+        OpenGL::GL
+        glfw
+        libglew_static
+        glm::glm
+        nle_imgui
+        SDL2_mixer::SDL2_mixer-static
+        SDL2::SDL2-static)
+endif()
 
 # The two headers included by the paths a Linux system lays them out at, and
 # stb's implementation, which a Linux system supplies as a library.

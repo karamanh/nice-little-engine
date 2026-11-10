@@ -15,7 +15,7 @@
 #include "render_command.h"
 #include "render_context.h"
 
-#include <GL/gl.h>
+#include "gl.h"
 
 namespace nle
 {

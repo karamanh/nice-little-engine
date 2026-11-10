@@ -11,7 +11,7 @@
 
 namespace nle
 {
-    renderer_3d::renderer_3d(ref<window_glfw> render_target)
+    renderer_3d::renderer_3d(ref<platform_window> render_target)
         : m_render_target(render_target)
     {
         glClearColor(m_clear_color.r, m_clear_color.g, m_clear_color.b, 1.0f);
@@ -119,7 +119,7 @@ namespace nle
         return m_bloom;
     }
 
-    ref<window_glfw> renderer_3d::render_target()
+    ref<platform_window> renderer_3d::render_target()
     {
         return m_render_target;
     }
@@ -377,7 +377,7 @@ namespace nle
                 // -- particles, which are laid out differently, among them.
                 m_opengl_backend.execute_commands(m_shadow_commands);
 
-                m_shadows.end(m_render_target->width(), m_render_target->height());
+                m_shadows.end(m_render_target->drawable_width(), m_render_target->drawable_height());
             }
             else
             {
@@ -719,9 +719,13 @@ namespace nle
         m_last_frame_us = now_us;
         m_time = static_cast<float>(now_us) / 1000000.0f;
 
-        const int width = m_render_target->width();
-        const int height = m_render_target->height();
+        // In the screen's pixels, which on a phone are not the window's units.
+        const int width = m_render_target->drawable_width();
+        const int height = m_render_target->drawable_height();
 
+        // Timed where the driver can time it: OpenGL ES has no such query of
+        // its own.
+#ifndef NLE_GLES
         if(m_gpu_queries[0] == 0)
         {
             glGenQueries(2, m_gpu_queries);
@@ -729,6 +733,7 @@ namespace nle
 
         const unsigned int timing = m_gpu_queries[m_gpu_frames % 2];
         glBeginQuery(GL_TIME_ELAPSED, timing);
+#endif
 
         // The scene goes into bloom's own target when it is on, and straight
         // to the window when it is not. Either way it is cleared once, here.
@@ -748,6 +753,7 @@ namespace nle
         // lands on the window either way.
         m_bloom.end();
 
+#ifndef NLE_GLES
         glEndQuery(GL_TIME_ELAPSED);
 
         // Last frame's, which has had a frame to finish.
@@ -764,11 +770,11 @@ namespace nle
                 m_gpu_ms = static_cast<float>(nanoseconds) / 1.0e6f;
             }
         }
+#endif
 
         ++m_gpu_frames;
 
-        // glfw specific functions like glfwSwapBuffers are called
-        // from window_glfw::display().
+        // Buffers are swapped by the window, in its display().
         // we only have gl specific function calls here.
     }
 

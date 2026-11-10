@@ -498,6 +498,13 @@ float sunlight_reaching(vec3 normal)
         return 1.0;
     }
 
+    // Nor outside its sides. The map is clamped to a lit border where there
+    // is one, and OpenGL ES has none.
+    if (any(lessThan(projected.xy, vec2(0.0))) || any(greaterThan(projected.xy, vec2(1.0))))
+    {
+        return 1.0;
+    }
+
     // Surfaces edge-on to the light need a larger bias, because one texel
     // of the depth map covers a long way across them. Without the slope
     // term every ground plane gets stripes at dawn and dusk.

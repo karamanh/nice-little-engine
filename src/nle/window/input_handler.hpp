@@ -14,6 +14,7 @@
 #include <array>
 
 #include "../core/signal.hpp"
+#include "gamepad.h"
 
 namespace nle
 {
@@ -110,6 +111,8 @@ public:
         : m_handle(handle)
     {}
 
+    virtual ~input_handler() = default;
+
     /**
      * @brief True while @p key is held down.
      *
@@ -130,6 +133,13 @@ public:
     {
         return button >= 0 && static_cast<size_t>(button) < m_mouse_buttons.size()
             && m_mouse_buttons[static_cast<size_t>(button)];
+    }
+
+    /// The first controller plugged in, as it is this moment; not connected
+    /// when there is none.
+    virtual gamepad pad() const
+    {
+        return gamepad();
     }
 };
 
