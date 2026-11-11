@@ -36,6 +36,7 @@ enum class command_type
     set_uniform_matrix4_array,
     set_uniform_vec3,
     set_uniform_vec4,
+    set_uniform_vec4_array,
     set_uniform_float,
     set_uniform_int,
     use_texture,
@@ -49,7 +50,8 @@ enum class command_type
 struct uniform_data
 {
     std::string name;
-    std::variant<glm::mat4, glm::vec3, glm::vec4, float, int, std::vector<glm::mat4>> value;
+    std::variant<glm::mat4, glm::vec3, glm::vec4, float, int, std::vector<glm::mat4>,
+                 std::vector<glm::vec4>> value;
 };
 
 struct polygon_mode_data
@@ -137,6 +139,7 @@ public:
     void set_uniform(const std::string& name, const std::vector<glm::mat4>& value);
     void set_uniform(const std::string& name, const glm::vec3& value);
     void set_uniform(const std::string& name, const glm::vec4& value);
+    void set_uniform(const std::string& name, const std::vector<glm::vec4>& value);
     void set_uniform(const std::string& name, float value);
     void set_uniform(const std::string& name, int value);
     void use_texture(ref<texture> texture, unsigned int unit = 0);

@@ -62,6 +62,14 @@ void render_command_buffer::set_uniform(const std::string& name, const glm::vec4
     m_commands.push_back(cmd);
 }
 
+void render_command_buffer::set_uniform(const std::string& name, const std::vector<glm::vec4>& value)
+{
+    render_command cmd;
+    cmd.type = command_type::set_uniform_vec4_array;
+    cmd.data = uniform_data{name, value};
+    m_commands.push_back(cmd);
+}
+
 void render_command_buffer::set_uniform(const std::string& name, const glm::vec3& value)
 {
     render_command cmd;

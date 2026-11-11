@@ -24,6 +24,8 @@
 
 #include <glm/glm.hpp>
 
+#include <vector>
+
 namespace nle
 {
 
@@ -184,6 +186,7 @@ public:
 
     /// How far from the middle they are born.
     void set_radius(float radius);
+    float radius() const;
 
     /**
      * @brief Spreads where they are born along a line rather than a point.
@@ -198,6 +201,24 @@ public:
      */
     void set_span(const glm::vec3& span);
     const glm::vec3& span() const;
+
+    /// How many points a path may have. The shader holds exactly this many.
+    static constexpr size_t MOST_PATH_POINTS = 12;
+
+    /**
+     * @brief Spreads where they are born along a bent line: a bow's limbs.
+     *
+     * A span is straight, and a thing that curves glows beside itself along
+     * one. @p points are joined in order, each a world-space offset from the
+     * emitter as a span is, and births are spread evenly along the whole
+     * length of them however unevenly the points are spaced. Fewer than two
+     * is no path, and the span is used as before; points past
+     * MOST_PATH_POINTS are left off.
+     *
+     * An arc given a path runs along it, end to end, rather than striking
+     * down from above: lightning through the thing itself.
+     */
+    void set_path(const std::vector<glm::vec3>& points);
 
     /// Overall brightness. Everything else being equal, this is the dial to
     /// turn when a thing should read as more enchanted.
@@ -267,6 +288,12 @@ private:
     /// Where they are born, spread along this from the emitter. Zero for a
     /// point, which is the ordinary case.
     glm::vec3 m_span = glm::vec3(0.0f);
+
+    /// The bent line they are born along instead, when there is one: each
+    /// point, and in w how far along the whole of it that point is, nought
+    /// to one.
+    std::vector<glm::vec4> m_path;
+    int m_path_count = 0;
     float m_intensity = 1.0f;
     bool m_thin_with_distance = false;
     bool m_dark = false;

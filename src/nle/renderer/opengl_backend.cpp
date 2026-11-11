@@ -298,6 +298,18 @@ void opengl_backend::execute_command(const render_command& cmd)
             }
             break;
         }
+        case command_type::set_uniform_vec4_array:
+        {
+            const auto& uniform = std::get<uniform_data>(cmd.data);
+            const auto& vectors = std::get<std::vector<glm::vec4>>(uniform.value);
+            int loc = location(uniform.name);
+            if (loc != -1 && !vectors.empty())
+            {
+                glUniform4fv(loc, static_cast<GLsizei>(vectors.size()), glm::value_ptr(vectors.front()));
+                ++m_statistics.uniform_uploads;
+            }
+            break;
+        }
         case command_type::set_uniform_float:
         {
             const auto& uniform = std::get<uniform_data>(cmd.data);

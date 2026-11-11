@@ -43,6 +43,8 @@ uniform float u_speed;
 uniform float u_size;
 uniform float u_radius;
 uniform vec3  u_span;
+uniform vec4  u_path[12];
+uniform int   u_path_count;
 uniform int   u_count;
 uniform int   u_style;
 uniform int   u_once;
@@ -99,6 +101,9 @@ void main()
 
     vec3 local = vec3(0.0);
     float size = u_size;
+
+    // How far along the span, or the path, this one is born.
+    float where = fract(r.z + phase);
 
     if(u_style == 0)
     {
@@ -199,6 +204,23 @@ void main()
         float height = u_radius * 1.5 * (1.0 - (k + along) / legs);
 
         local = vec3(sideways.x, height, sideways.y);
+
+        // Given a path, the strike runs along it instead of coming down onto
+        // its end: more legs, for a longer way to go, each wandering off the
+        // line in any direction and both ends on it.
+        if(u_path_count > 1)
+        {
+            legs = 14.0;
+            k = floor(t * legs);
+            along = fract(t * legs);
+
+            vec3 c = (hash3(strike * 13.0 + k) - 0.5) * u_radius * min(1.0, min(k, legs - k));
+            vec3 d = (hash3(strike * 13.0 + k + 1.0) - 0.5) * u_radius
+                   * min(1.0, min(k + 1.0, legs - k - 1.0));
+
+            local = mix(c, d, along);
+            where = (k + along) / legs;
+        }
 
         // Thin, and gone between strikes that do not happen.
         float strikes = step(hash3(strike * 3.7).x, u_speed);
@@ -308,7 +330,37 @@ void main()
     // its length. Added after the model transform because the span is given
     // in world terms: only the birthplace moves, so a flame spread along a
     // blade still rises rather than running along it.
-    centre += u_span * fract(r.z + phase);
+    if(u_path_count > 1)
+    {
+        // Or along a bent one: the stretch of the path this one falls in,
+        // and how far through that stretch.
+        vec3 on_path = u_path[0].xyz;
+
+        for(int i = 1; i < 12; ++i)
+        {
+            if(i >= u_path_count)
+            {
+                break;
+            }
+
+            on_path = u_path[i].xyz;
+
+            if(where <= u_path[i].w)
+            {
+                float stretch = max(u_path[i].w - u_path[i - 1].w, 0.00001);
+
+                on_path = mix(u_path[i - 1].xyz, u_path[i].xyz,
+                              clamp((where - u_path[i - 1].w) / stretch, 0.0, 1.0));
+                break;
+            }
+        }
+
+        centre += on_path;
+    }
+    else
+    {
+        centre += u_span * where;
+    }
 
     // Turned to face the camera by building the quad in view space, which is
     // the cheapest billboard there is: no per-particle matrix, no cross
@@ -526,6 +578,11 @@ void particle_emitter::set_radius(float radius)
     m_radius = radius;
 }
 
+float particle_emitter::radius() const
+{
+    return m_radius;
+}
+
 void particle_emitter::set_span(const glm::vec3& span)
 {
     m_span = span;
@@ -534,6 +591,48 @@ void particle_emitter::set_span(const glm::vec3& span)
 const glm::vec3& particle_emitter::span() const
 {
     return m_span;
+}
+
+void particle_emitter::set_path(const std::vector<glm::vec3>& points)
+{
+    m_path.clear();
+
+    if(points.size() < 2)
+    {
+        return;
+    }
+
+    const size_t count = std::min(points.size(), MOST_PATH_POINTS);
+
+    float length = 0.0f;
+
+    for(size_t i = 0; i < count; ++i)
+    {
+        if(i > 0)
+        {
+            length += glm::length(points[i] - points[i - 1]);
+        }
+
+        m_path.emplace_back(points[i], length);
+    }
+
+    // No length is no path: every point in one place, which a span of
+    // nothing already says.
+    if(length <= 0.0f)
+    {
+        m_path.clear();
+        return;
+    }
+
+    for(glm::vec4& point : m_path)
+    {
+        point.w /= length;
+    }
+
+    // The shader's array is always the whole of it, so what is not used is
+    // sent as the last point rather than as whatever was there before.
+    m_path.resize(MOST_PATH_POINTS, m_path.back());
+    m_path_count = static_cast<int>(count);
 }
 
 void particle_emitter::set_intensity(float intensity)
@@ -603,6 +702,15 @@ void particle_emitter::render(render_command_buffer& command_buffer,
     command_buffer.set_uniform("u_size", m_size);
     command_buffer.set_uniform("u_radius", m_radius);
     command_buffer.set_uniform("u_span", m_span);
+
+    // One shader for every emitter, so the count is said each time: a path
+    // left over from the last one drawn is somebody else's bow.
+    command_buffer.set_uniform("u_path_count", m_path.empty() ? 0 : m_path_count);
+
+    if(!m_path.empty())
+    {
+        command_buffer.set_uniform("u_path[0]", m_path);
+    }
     command_buffer.set_uniform("u_count", static_cast<int>(drawn));
     command_buffer.set_uniform("u_style", static_cast<int>(m_style));
     command_buffer.set_uniform("u_once", m_once ? 1 : 0);
