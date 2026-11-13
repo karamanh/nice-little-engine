@@ -185,6 +185,17 @@ public:
     void set_fog_cap(float cap);
     float fog_cap() const;
 
+    /**
+     * @brief Drawn after every other solid thing, rather than among them.
+     *
+     * For what fills the screen and is mostly hidden: the ground. Drawn
+     * first, every pixel of it is shaded and then most are painted over by
+     * the town standing on it; drawn last, the ones behind a wall are thrown
+     * away before they cost anything.
+     */
+    void set_drawn_late(bool late);
+    bool drawn_late() const;
+
     void set_outline(float width, const glm::vec3& colour = glm::vec3(1.0f));
     float outline_width() const;
     const glm::vec3& outline_colour() const;
@@ -207,7 +218,9 @@ public:
 
     ref<class render_object_3d> scene();
 
-    std::set<ref<class render_object_3d>, std::owner_less<ref<class render_object_3d>>> render_objects();
+    /// By reference: a scene's are a couple of thousand, and the renderer
+    /// asks several times a frame. Copy it before changing what is in it.
+    const std::set<ref<class render_object_3d>, std::owner_less<ref<class render_object_3d>>>& render_objects() const;
 
     virtual void add_child(ref<object_3d> child) override;
     virtual void delete_child(ref<object_3d> child) override;
@@ -230,6 +243,7 @@ private:
     ref<class render_object_3d> m_scene;
     ref<class material> m_material_override;
 
+    bool m_drawn_late = false;
     float m_outline_width = 0.0f;
     float m_glow_shell_width = 0.0f;
     glm::vec3 m_glow_shell_colour = glm::vec3(1.0f);

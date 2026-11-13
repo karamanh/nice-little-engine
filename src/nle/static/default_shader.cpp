@@ -111,7 +111,16 @@ void main() {
 
     gl_Position = u_projection * u_view * world_position;
     io_texture_coordinates = texture_coordinates;
-    io_normal = mat3(transpose(inverse(model))) * normal;
+    // The matrix that carries a normal: the model's inverse, transposed --
+    // which, for the three by three that turns and stretches, is its
+    // cofactors over its determinant. Three cross products, where inverting
+    // the whole four by four for every vertex of every thing drawn was most
+    // of what this shader did. The length does not matter (the fragment
+    // shader takes it off), only the sign: a mirrored model's flips.
+    mat3 turn = mat3(model);
+    mat3 carries = mat3(cross(turn[1], turn[2]), cross(turn[2], turn[0]), cross(turn[0], turn[1]));
+
+    io_normal = carries * normal * (dot(turn[0], carries[0]) < 0.0 ? -1.0 : 1.0);
     io_frag_position = world_position.xyz;
 
     // Where this ends up in the depth map the sun drew. Worked out here
@@ -286,30 +295,39 @@ vec3 ground_colour(vec2 uv)
         ? texture(u_terrain_splat, splat_uv)
         : vec4(0.0);
 
+    // How fast the ground's uv changes across the screen, taken once here:
+    // a picture read inside a branch cannot work that out for itself (what
+    // its neighbours did in the branch is anybody's guess), so each layer is
+    // handed it. That is what lets a layer that is not painted here go
+    // unread -- and over most of the ground five of six are not. Reading all
+    // of them for every pixel of the ground was most of what the ground cost.
+    vec2 across = dFdx(field);
+    vec2 down = dFdy(field);
+
     // Each over the last, in the order they are painted -- which is how the
     // brush behaves, and so how a road laid over grass is expected to look.
-    if ((u_terrain_layers_enabled & 1) != 0)
+    if ((u_terrain_layers_enabled & 1) != 0 && weights.r > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_0, field * u_terrain_layer_tiling.x).rgb,
-                     weights.r);
+        float t = u_terrain_layer_tiling.x;
+        result = mix(result, textureGrad(u_terrain_layer_0, field * t, across * t, down * t).rgb, weights.r);
     }
 
-    if ((u_terrain_layers_enabled & 2) != 0)
+    if ((u_terrain_layers_enabled & 2) != 0 && weights.g > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_1, field * u_terrain_layer_tiling.y).rgb,
-                     weights.g);
+        float t = u_terrain_layer_tiling.y;
+        result = mix(result, textureGrad(u_terrain_layer_1, field * t, across * t, down * t).rgb, weights.g);
     }
 
-    if ((u_terrain_layers_enabled & 4) != 0)
+    if ((u_terrain_layers_enabled & 4) != 0 && weights.b > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_2, field * u_terrain_layer_tiling.z).rgb,
-                     weights.b);
+        float t = u_terrain_layer_tiling.z;
+        result = mix(result, textureGrad(u_terrain_layer_2, field * t, across * t, down * t).rgb, weights.b);
     }
 
-    if ((u_terrain_layers_enabled & 8) != 0)
+    if ((u_terrain_layers_enabled & 8) != 0 && weights.a > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_3, field * u_terrain_layer_tiling.w).rgb,
-                     weights.a);
+        float t = u_terrain_layer_tiling.w;
+        result = mix(result, textureGrad(u_terrain_layer_3, field * t, across * t, down * t).rgb, weights.a);
     }
 
     // The next four, from the second map. Skipped entirely when there is no
@@ -321,28 +339,28 @@ vec3 ground_colour(vec2 uv)
 
     vec4 more = texture(u_terrain_splat_b, splat_uv);
 
-    if ((u_terrain_layers_enabled & 16) != 0)
+    if ((u_terrain_layers_enabled & 16) != 0 && more.r > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_4, field * u_terrain_layer_tiling_b.x).rgb,
-                     more.r);
+        float t = u_terrain_layer_tiling_b.x;
+        result = mix(result, textureGrad(u_terrain_layer_4, field * t, across * t, down * t).rgb, more.r);
     }
 
-    if ((u_terrain_layers_enabled & 32) != 0)
+    if ((u_terrain_layers_enabled & 32) != 0 && more.g > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_5, field * u_terrain_layer_tiling_b.y).rgb,
-                     more.g);
+        float t = u_terrain_layer_tiling_b.y;
+        result = mix(result, textureGrad(u_terrain_layer_5, field * t, across * t, down * t).rgb, more.g);
     }
 
-    if ((u_terrain_layers_enabled & 64) != 0)
+    if ((u_terrain_layers_enabled & 64) != 0 && more.b > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_6, field * u_terrain_layer_tiling_b.z).rgb,
-                     more.b);
+        float t = u_terrain_layer_tiling_b.z;
+        result = mix(result, textureGrad(u_terrain_layer_6, field * t, across * t, down * t).rgb, more.b);
     }
 
-    if ((u_terrain_layers_enabled & 128) != 0)
+    if ((u_terrain_layers_enabled & 128) != 0 && more.a > 0.0)
     {
-        result = mix(result, texture(u_terrain_layer_7, field * u_terrain_layer_tiling_b.w).rgb,
-                     more.a);
+        float t = u_terrain_layer_tiling_b.w;
+        result = mix(result, textureGrad(u_terrain_layer_7, field * t, across * t, down * t).rgb, more.a);
     }
 
     return result;

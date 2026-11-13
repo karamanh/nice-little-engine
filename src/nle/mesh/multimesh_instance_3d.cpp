@@ -64,7 +64,7 @@ namespace nle
 
     void multimesh_instance_3d::render(render_command_buffer& command_buffer, const render_context& context)
     {
-        for(auto ro : render_objects())
+        for(const auto& ro : render_objects())
         {
             // The whole of it polished alike: the pieces take the sheen that
             // was asked of the model.
@@ -78,7 +78,7 @@ namespace nle
     {
         render_object_3d::set_material_override(material_override);
 
-        for(auto ro : render_objects())
+        for(const auto& ro : render_objects())
         {
             ro->set_material_override(material_override);
         }

@@ -13,7 +13,10 @@ scene_3d::scene_3d()
 
 scene_3d::~scene_3d()
 {
-    for(auto ro : render_objects())
+    // A copy: deleting takes them out of the set being walked.
+    const auto all = render_objects();
+
+    for(const auto& ro : all)
     {
         delete_child(ro);
     }
@@ -138,7 +141,7 @@ const fog_data& scene_3d::fog() const
 
 void scene_3d::render(render_command_buffer& command_buffer, const render_context& context)
 {
-    for(auto it : render_objects())
+    for(const auto& it : render_objects())
     {
         it->render(command_buffer, context);
     }

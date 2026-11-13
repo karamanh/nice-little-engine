@@ -143,6 +143,16 @@ namespace nle
         return m_glow_shell_colour;
     }
 
+    void render_object_3d::set_drawn_late(bool late)
+    {
+        m_drawn_late = late;
+    }
+
+    bool render_object_3d::drawn_late() const
+    {
+        return m_drawn_late;
+    }
+
     void render_object_3d::set_outline(float width, const glm::vec3& colour)
     {
         m_outline_width = width > 0.0f ? width : 0.0f;
@@ -188,7 +198,7 @@ namespace nle
         return m_scene;
     }
 
-    std::set<ref<class render_object_3d>, std::owner_less<ref<class render_object_3d>>> render_object_3d::render_objects()
+    const std::set<ref<class render_object_3d>, std::owner_less<ref<class render_object_3d>>>& render_object_3d::render_objects() const
     {
         return m_render_objects;
     }

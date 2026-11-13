@@ -101,7 +101,16 @@ void main() {
 
     gl_Position = u_projection * u_view * world_position;
     io_texture_coordinates = texture_coordinates;
-    io_normal = mat3(transpose(inverse(model))) * normal;
+    // The matrix that carries a normal: the model's inverse, transposed --
+    // which, for the three by three that turns and stretches, is its
+    // cofactors over its determinant. Three cross products, where inverting
+    // the whole four by four for every vertex of every thing drawn was most
+    // of what this shader did. The length does not matter (the fragment
+    // shader takes it off), only the sign: a mirrored model's flips.
+    mat3 turn = mat3(model);
+    mat3 carries = mat3(cross(turn[1], turn[2]), cross(turn[2], turn[0]), cross(turn[0], turn[1]));
+
+    io_normal = carries * normal * (dot(turn[0], carries[0]) < 0.0 ? -1.0 : 1.0);
     io_frag_position = world_position.xyz;
 
     // Where this ends up in the depth map the sun drew. Worked out here

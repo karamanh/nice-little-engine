@@ -191,8 +191,10 @@ public:
      * @param size       world units along each edge
      * @param resolution tiles along each edge; vertices are not shared between
      *                   tiles, so the checker pattern has hard edges
+     * @param detail_distance see set_detail_distance; given here, nothing is
+     *                   built until the ground is first drawn
      */
-    terrain_3d(float size = 100.0f, int resolution = 50);
+    terrain_3d(float size = 100.0f, int resolution = 50, float detail_distance = 0.0f);
     virtual ~terrain_3d();
 
     /**
@@ -391,6 +393,35 @@ public:
 
     void rebuild();
 
+    // ---- level of detail --------------------------------------------------
+
+    /**
+     * @brief Draws the ground in patches, each as fine as its distance asks.
+     *
+     * One mesh the size of the map is every triangle of the map, every
+     * frame, wherever the camera is looking: half a million of them for a
+     * town two kilometres across, nearly all behind the eye or too far off
+     * to tell from a quarter as many. In patches, the ones off the screen
+     * are not drawn at all, and the rest are drawn at full detail only out
+     * to @p distance, at half out to twice that, a quarter out to four
+     * times, and an eighth beyond.
+     *
+     * Each patch hangs a skirt from its edges, so where a fine patch meets
+     * a coarse one the gap between their edges shows ground, not sky.
+     *
+     * Nought, the default, is one mesh as ever -- which is what sculpting
+     * wants, since a brush stroke then rewrites a few hundred vertices in
+     * place. Only ground that shares its vertices is drawn in patches: the
+     * checkerboard is one mesh whatever is asked.
+     */
+    void set_detail_distance(float distance);
+    float detail_distance() const;
+
+    /// How many patches were drawn last frame, and of how many triangles:
+    /// for seeing what the above is saving.
+    size_t patches_drawn() const;
+    size_t triangles_drawn() const;
+
     float size() const;
     int resolution() const;
 
@@ -547,6 +578,57 @@ private:
 
     /// Whether m_mesh is a grid, and so can be updated a patch at a time.
     bool m_mesh_is_grid = false;
+
+    // ---- level of detail --------------------------------------------------
+
+    /// Tiles along a patch's edge, and how many times it can be halved.
+    static constexpr int PATCH_TILES = 32;
+    static constexpr int DETAIL_LEVELS = 4;
+
+    /// One square of the ground with its own vertices: the same ones at
+    /// every level of detail, read every one, every other, every fourth...
+    struct patch
+    {
+        unsigned int vertices = 0;
+
+        /// One to a level, since which indices a vertex array draws with is
+        /// part of the array.
+        unsigned int arrays[DETAIL_LEVELS] = {};
+
+        /// A ball round it, in the terrain's own space, for asking whether
+        /// the camera can see it; and the box it fills, for how far off it is.
+        glm::vec3 centre = glm::vec3(0.0f);
+        float radius = 0.0f;
+        glm::vec3 low = glm::vec3(0.0f);
+        glm::vec3 high = glm::vec3(0.0f);
+    };
+
+    std::vector<patch> m_patches;
+
+    /// The triangles of a patch at each level: the same for every patch,
+    /// since each numbers its vertices the same way.
+    unsigned int m_patch_indices[DETAIL_LEVELS] = {};
+    size_t m_patch_index_counts[DETAIL_LEVELS] = {};
+
+    ref<class material> m_patch_material;
+
+    float m_detail_distance = 0.0f;
+
+    /// Set when the ground has changed since the patches were built. They
+    /// are built when next drawn: a level being loaded changes the ground
+    /// several times over before anybody sees it.
+    bool m_patches_stale = true;
+
+    size_t m_patches_drawn = 0;
+    size_t m_triangles_drawn = 0;
+
+    /// Whether the ground is drawn in patches rather than as one mesh.
+    bool in_patches() const;
+
+    void build_patches();
+    void free_patches();
+
+    void render_patches(render_command_buffer& command_buffer, const render_context& context);
 
     /**
      * @brief Re-does the vertices in a rectangle of samples, in place.

@@ -2,11 +2,14 @@
 
 #include "../mesh/mesh_3d.h"
 #include "../model/model.hpp"
+#include "../renderer/gl.h"
+#include "../renderer/surface_uniforms.h"
 
 #include <FastNoiseLite.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <random>
 #include <cstdint>
 
@@ -75,16 +78,21 @@ namespace
     }
 }
 
-terrain_3d::terrain_3d(float size, int resolution)
+terrain_3d::terrain_3d(float size, int resolution, float detail_distance)
     : mesh_instance_3d(nullptr),
       m_size(std::max(size, 1.0f)),
-      m_resolution(std::max(resolution, 1))
+      m_resolution(std::max(resolution, 1)),
+      m_detail_distance(std::max(detail_distance, 0.0f))
 {
+    // After everything standing on it: see set_drawn_late.
+    set_drawn_late(true);
+
     rebuild();
 }
 
 terrain_3d::~terrain_3d()
 {
+    free_patches();
 }
 
 void terrain_3d::set_height_function(std::function<float(float, float)> height)
@@ -482,7 +490,352 @@ void terrain_3d::render(render_command_buffer& command_buffer, const render_cont
     // of those is ever seen.
     splatmap();
 
+    // With a detail distance the ground is built here, when it is first
+    // looked at, rather than each time something about it is set.
+    if(m_detail_distance > 0.0f && m_patches_stale)
+    {
+        if(in_patches())
+        {
+            build_patches();
+        }
+        else
+        {
+            free_patches();
+            m_mesh = m_mesh_is_grid ? build_grid_mesh() : build_mesh();
+            m_patches_stale = false;
+        }
+    }
+
+    if(in_patches())
+    {
+        render_patches(command_buffer, context);
+        return;
+    }
+
     mesh_instance_3d::render(command_buffer, context);
+}
+
+// ---- level of detail --------------------------------------------------------
+
+namespace
+{
+    /// A patch's vertex: what the ground needs and no more. A mesh's carries
+    /// eight floats of skinning as well, which over a map is megabytes of
+    /// noughts.
+    struct ground_vertex
+    {
+        glm::vec3 position;
+        glm::vec3 normal;
+        glm::vec3 color;
+        glm::vec2 uv;
+    };
+
+    /// How far a patch's skirt hangs under its edge. As deep as the gap
+    /// between a fine edge and a coarse one can open on steep ground.
+    constexpr float SKIRT = 8.0f;
+}
+
+void terrain_3d::set_detail_distance(float distance)
+{
+    distance = std::max(distance, 0.0f);
+
+    const bool was = m_detail_distance > 0.0f;
+
+    m_detail_distance = distance;
+
+    // Only going from one mesh to patches or back is a rebuild; how far the
+    // detail reaches is asked afresh every frame.
+    if(was != (m_detail_distance > 0.0f))
+    {
+        rebuild();
+    }
+}
+
+float terrain_3d::detail_distance() const
+{
+    return m_detail_distance;
+}
+
+size_t terrain_3d::patches_drawn() const
+{
+    return m_patches_drawn;
+}
+
+size_t terrain_3d::triangles_drawn() const
+{
+    return m_triangles_drawn;
+}
+
+bool terrain_3d::in_patches() const
+{
+    // Whole patches only: ground whose edge is not a multiple of a patch
+    // across is drawn as one mesh, as is the checkerboard, whose tiles do
+    // not share their corners.
+    return m_detail_distance > 0.0f && m_mesh_is_grid
+        && m_resolution >= PATCH_TILES && m_resolution % PATCH_TILES == 0;
+}
+
+void terrain_3d::free_patches()
+{
+    for(patch& one : m_patches)
+    {
+        glDeleteVertexArrays(DETAIL_LEVELS, one.arrays);
+        glDeleteBuffers(1, &one.vertices);
+    }
+
+    m_patches.clear();
+
+    if(m_patch_indices[0] != 0)
+    {
+        glDeleteBuffers(DETAIL_LEVELS, m_patch_indices);
+    }
+
+    for(int level = 0; level < DETAIL_LEVELS; ++level)
+    {
+        m_patch_indices[level] = 0;
+        m_patch_index_counts[level] = 0;
+    }
+}
+
+void terrain_3d::build_patches()
+{
+    free_patches();
+
+    m_patches_stale = false;
+
+    const int across = m_resolution / PATCH_TILES;
+    const int side = PATCH_TILES + 1;
+    const float half = m_size * 0.5f;
+    const float step = m_size / static_cast<float>(m_resolution);
+
+    // Where each sort of vertex is in a patch's buffer: the square first, a
+    // row at a time, then the skirt under each of its four edges.
+    const auto corner = [side](int x, int z) { return static_cast<uint32_t>(z * side + x); };
+    const uint32_t skirt_first = static_cast<uint32_t>(side * side);
+
+    // ---- the triangles, once for every patch --------------------------------
+    glGenBuffers(DETAIL_LEVELS, m_patch_indices);
+
+    for(int level = 0; level < DETAIL_LEVELS; ++level)
+    {
+        const int stride = 1 << level;
+        const int cells = PATCH_TILES / stride;
+
+        std::vector<uint32_t> indices;
+        indices.reserve(static_cast<size_t>(cells) * cells * 6 + static_cast<size_t>(cells) * 24);
+
+        for(int z = 0; z < cells; ++z)
+        {
+            for(int x = 0; x < cells; ++x)
+            {
+                const uint32_t bottom_left = corner(x * stride, z * stride);
+                const uint32_t bottom_right = corner((x + 1) * stride, z * stride);
+                const uint32_t top_left = corner(x * stride, (z + 1) * stride);
+                const uint32_t top_right = corner((x + 1) * stride, (z + 1) * stride);
+
+                // counter-clockwise seen from above, as the one mesh is
+                indices.insert(indices.end(), { top_left, top_right, bottom_right,
+                                                top_left, bottom_right, bottom_left });
+            }
+        }
+
+        // The skirt: under each edge, a strip from the edge down to its copy.
+        for(int edge = 0; edge < 4; ++edge)
+        {
+            for(int i = 0; i < cells; ++i)
+            {
+                const int a = i * stride;
+                const int b = (i + 1) * stride;
+
+                const uint32_t top_a = edge == 0 ? corner(a, 0) : edge == 1 ? corner(a, PATCH_TILES)
+                                     : edge == 2 ? corner(0, a) : corner(PATCH_TILES, a);
+                const uint32_t top_b = edge == 0 ? corner(b, 0) : edge == 1 ? corner(b, PATCH_TILES)
+                                     : edge == 2 ? corner(0, b) : corner(PATCH_TILES, b);
+
+                const uint32_t under_a = skirt_first + static_cast<uint32_t>(edge * side + a);
+                const uint32_t under_b = skirt_first + static_cast<uint32_t>(edge * side + b);
+
+                indices.insert(indices.end(), { top_a, top_b, under_b,
+                                                top_a, under_b, under_a });
+            }
+        }
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_patch_indices[level]);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices.size() * sizeof(uint32_t)),
+                     indices.data(), GL_STATIC_DRAW);
+
+        m_patch_index_counts[level] = indices.size();
+    }
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    // ---- the vertices, a patch at a time -------------------------------------
+    std::vector<ground_vertex> vertices;
+    vertices.reserve(static_cast<size_t>(side) * side + static_cast<size_t>(side) * 4);
+
+    m_patches.reserve(static_cast<size_t>(across) * across);
+
+    for(int patch_z = 0; patch_z < across; ++patch_z)
+    {
+        for(int patch_x = 0; patch_x < across; ++patch_x)
+        {
+            vertices.clear();
+
+            float lowest = 1.0e30f;
+            float highest = -1.0e30f;
+
+            for(int z = 0; z < side; ++z)
+            {
+                for(int x = 0; x < side; ++x)
+                {
+                    const int sample_x = patch_x * PATCH_TILES + x;
+                    const int sample_z = patch_z * PATCH_TILES + z;
+
+                    const float px = static_cast<float>(sample_x) * step - half;
+                    const float pz = static_cast<float>(sample_z) * step - half;
+
+                    const float y = local_height(px, pz);
+                    const glm::vec3 normal = local_normal(px, pz);
+
+                    vertices.push_back({ { px, y, pz },
+                                         normal,
+                                         surface_color(sample_x, sample_z, y, normal),
+                                         { static_cast<float>(sample_x), static_cast<float>(sample_z) } });
+
+                    lowest = std::min(lowest, y);
+                    highest = std::max(highest, y);
+                }
+            }
+
+            // The skirt: each edge's vertices again, lower. Shaded as the
+            // edge above them is, so what shows in a gap is more ground.
+            for(int edge = 0; edge < 4; ++edge)
+            {
+                for(int i = 0; i < side; ++i)
+                {
+                    ground_vertex under = vertices[edge == 0 ? corner(i, 0) : edge == 1 ? corner(i, PATCH_TILES)
+                                                 : edge == 2 ? corner(0, i) : corner(PATCH_TILES, i)];
+
+                    under.position.y -= SKIRT;
+                    vertices.push_back(under);
+                }
+            }
+
+            patch made;
+
+            const glm::vec3 low = vertices.front().position;
+            const glm::vec3 high = vertices[corner(PATCH_TILES, PATCH_TILES)].position;
+
+            made.low = glm::vec3(low.x, lowest, low.z);
+            made.high = glm::vec3(high.x, highest, high.z);
+            made.centre = (made.low + made.high) * 0.5f;
+            made.radius = glm::length(made.high - made.centre);
+
+            glGenBuffers(1, &made.vertices);
+            glBindBuffer(GL_ARRAY_BUFFER, made.vertices);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(ground_vertex)),
+                         vertices.data(), GL_STATIC_DRAW);
+
+            glGenVertexArrays(DETAIL_LEVELS, made.arrays);
+
+            for(int level = 0; level < DETAIL_LEVELS; ++level)
+            {
+                glBindVertexArray(made.arrays[level]);
+                glBindBuffer(GL_ARRAY_BUFFER, made.vertices);
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_patch_indices[level]);
+
+                // Where the shaders look for each: position, normal, colour
+                // and uv. The skinning attributes are left off, and read as
+                // nothing.
+                const GLsizei each = static_cast<GLsizei>(sizeof(ground_vertex));
+
+                glEnableVertexAttribArray(0);
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, each,
+                                      reinterpret_cast<void*>(offsetof(ground_vertex, position)));
+                glEnableVertexAttribArray(1);
+                glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, each,
+                                      reinterpret_cast<void*>(offsetof(ground_vertex, normal)));
+                glEnableVertexAttribArray(2);
+                glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, each,
+                                      reinterpret_cast<void*>(offsetof(ground_vertex, color)));
+                glEnableVertexAttribArray(3);
+                glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, each,
+                                      reinterpret_cast<void*>(offsetof(ground_vertex, uv)));
+            }
+
+            glBindVertexArray(0);
+
+            m_patches.push_back(made);
+        }
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    if(!m_patch_material)
+    {
+        // As the one mesh's is: ground is diffuse.
+        m_patch_material = make_ref<material>();
+        m_patch_material->set_ambient(glm::vec3(0.30f));
+        m_patch_material->set_diffuse(glm::vec3(0.85f));
+        m_patch_material->set_specular(glm::vec3(0.04f));
+        m_patch_material->set_shininess(8.0f);
+        m_patch_material->set_dissolve(1.0f);
+    }
+}
+
+void terrain_3d::render_patches(render_command_buffer& command_buffer, const render_context& context)
+{
+    m_patches_drawn = 0;
+    m_triangles_drawn = 0;
+
+    const auto& used = this->material_override() ? this->material_override() : m_patch_material;
+
+    // Said once for all of them: every patch is the same surface.
+    command_buffer.set_polygon_mode(GL_FRONT_AND_BACK, static_cast<GLenum>(render_mode()));
+    command_buffer.use_shader(this->shader());
+
+    record_surface_uniforms(command_buffer, context, nullptr, used);
+
+    command_buffer.set_uniform("u_skinning_enabled", 0);
+    command_buffer.set_uniform("u_model", this->transform_matrix());
+
+    record_extra_uniforms(command_buffer, context);
+
+    if(this->fog_cap() < 1.0f)
+    {
+        command_buffer.set_uniform("u_material.fog_limit",
+                                   std::min(used ? used->fog_limit() : 1.0f, this->fog_cap()));
+    }
+
+    // The eye and the patches in the same space. The ground is moved but
+    // never turned or stretched, so that is its position taken away.
+    const glm::vec3 offset = position();
+    const glm::vec3 eye = context.eye_position - offset;
+
+    for(const patch& one : m_patches)
+    {
+        if(!context.view_frustum.holds(one.centre + offset, one.radius))
+        {
+            continue;
+        }
+
+        // How far to the nearest of it, not to its middle: the patch the
+        // camera stands on is at no distance, however wide it is.
+        const glm::vec3 nearest = glm::clamp(eye, one.low, one.high);
+        const float away = glm::distance(eye, nearest);
+
+        const int level = away < m_detail_distance        ? 0
+                        : away < m_detail_distance * 2.0f ? 1
+                        : away < m_detail_distance * 4.0f ? 2
+                                                          : 3;
+
+        command_buffer.draw_elements(static_cast<GLenum>(this->primitive_type()), one.arrays[level],
+                                     m_patch_indices[level], m_patch_index_counts[level]);
+
+        ++m_patches_drawn;
+        m_triangles_drawn += m_patch_index_counts[level] / 3;
+    }
 }
 
 void terrain_3d::record_extra_uniforms(render_command_buffer& command_buffer,
@@ -1256,6 +1609,19 @@ void terrain_3d::rebuild()
     // say anything anyone would ship -- shares them, and rebuilds an order of
     // magnitude faster for it.
     m_mesh_is_grid = !(m_layers.empty() && m_heights.empty() && m_paint.empty());
+
+    // With a detail distance, nothing is built until it is next drawn: a
+    // level coming in changes the ground several times before anybody looks
+    // at it, and each of those was the whole map built and thrown away.
+    if(m_detail_distance > 0.0f)
+    {
+        m_mesh.reset();
+        m_patches_stale = true;
+        return;
+    }
+
+    free_patches();
+
     m_mesh = m_mesh_is_grid ? build_grid_mesh() : build_mesh();
 }
 

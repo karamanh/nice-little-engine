@@ -346,7 +346,7 @@ namespace nle
 
                 std::vector<ref<render_object_3d>> casting_now;
 
-                for(auto ro : scene->render_objects())
+                for(const auto& ro : scene->render_objects())
                 {
                     if(!ro->visible() || !ro->casts_shadow())
                     {
@@ -415,7 +415,7 @@ namespace nle
         std::vector<ref<render_object_3d>> see_through;
         std::vector<ref<render_object_3d>> solid;
 
-        for(auto ro : scene->render_objects())
+        for(const auto& ro : scene->render_objects())
         {
             if(!is_visible(ro, context.eye_position, context.view_frustum))
             {
@@ -430,6 +430,11 @@ namespace nle
 
             solid.push_back(ro);
         }
+
+        // What asked to be last among them -- the ground -- last, so what
+        // stands on it has already written its depth.
+        std::stable_partition(solid.begin(), solid.end(),
+                              [](const ref<render_object_3d>& ro) { return !ro->drawn_late(); });
 
         render_together(m_command_buffer, context, solid);
 
@@ -523,7 +528,7 @@ namespace nle
 
         bool any = false;
 
-        for(auto ro : scene->render_objects())
+        for(const auto& ro : scene->render_objects())
         {
             if(ro->glow_shell_width() <= 0.0f || !is_visible(ro, context.eye_position, context.view_frustum))
             {
@@ -608,7 +613,7 @@ namespace nle
 
         bool any = false;
 
-        for(auto ro : scene->render_objects())
+        for(const auto& ro : scene->render_objects())
         {
             if(ro->outline_width() <= 0.0f || !is_visible(ro, context.eye_position, context.view_frustum))
             {

@@ -60,7 +60,10 @@ void main()
     }
 
     vec4 world_position = model * vec4(position, 1.0);
-    vec3 world_normal = mat3(transpose(inverse(model))) * normal;
+    // As default_vert.glsl carries a normal: the cofactors, not an inverse.
+    mat3 turn = mat3(model);
+    mat3 carries = mat3(cross(turn[1], turn[2]), cross(turn[2], turn[0]), cross(turn[0], turn[1]));
+    vec3 world_normal = carries * normal * (dot(turn[0], carries[0]) < 0.0 ? -1.0 : 1.0);
 
     float length_of = length(world_normal);
     vec3 outward = length_of > 0.0 ? world_normal / length_of : vec3(0.0);
